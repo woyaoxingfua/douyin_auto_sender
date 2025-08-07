@@ -1,4 +1,4 @@
-# 抖音PC客户端 - 每日天气助手-自动续火花 (v4.5)
+# 抖音PC客户端 - 每日天气助手-自动续火花 
 
 本项目是一个基于 Python 的桌面UI自动化工具，旨在每日定时向指定的抖音好友发送其所在城市的天气预报。它通过结合和风天气API、图形用户界面(GUI)配置工具以及 PyAutoGUI 库实现全自动化操作。
 
@@ -37,7 +37,7 @@ douyin_auto_sender/
 
   * **Python**: 建议使用 3.8 或更高版本。
   * **PyCharm**: 用于项目管理和编码。
-  * **Tesseract-OCR**: 用于图像文字识别的底层引擎（在我们的项目中，`pyautogui`依赖它，但我们主要用图像识别）。
+  * **Tesseract-OCR**: 用于图像文字识别的底层引擎（在我们的项目中，`pyautogui`依赖它，但我们主要用图像识别，项目地址https://github.com/UB-Mannheim/tesseract）。
 
 #### 2\. Python库安装
 
