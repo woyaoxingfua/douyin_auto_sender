@@ -37,7 +37,7 @@ douyin_auto_sender/
 
   * **Python**: 建议使用 3.8 或更高版本。
   * **PyCharm**: 用于项目管理和编码。
-  * **Tesseract-OCR**: 用于图像文字识别的底层引擎（在我们的项目中，`pyautogui`依赖它，但我们主要用图像识别，项目地址https://github.com/UB-Mannheim/tesseract）。
+  * **Tesseract-OCR**: 用于图像文字识别的底层引擎（在我们的项目中，`pyautogui`依赖它，但我们主要用图像识别，项目地址https://github.com/UB-Mannheim/tesseract ）。
 
 #### 2\. Python库安装
 
