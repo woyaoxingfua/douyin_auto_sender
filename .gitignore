@@ -1,0 +1,5 @@
+# Sensitive configuration file
+config.json
+
+# Folder with friend avatars
+friend_avatars/
