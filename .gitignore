@@ -1,7 +1,13 @@
-# Sensitive configuration file
-config.json
-
-# Folder with friend avatars
-friend_avatars/*
+# IDE and system files
+.idea/
+.venv/
 .DS_Store
-!friend_avatars/.gitkeep
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local configuration and data (IMPORTANT for privacy)
+config.json
+run.log
+friend_avatars/

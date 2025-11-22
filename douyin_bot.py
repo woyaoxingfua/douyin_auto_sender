@@ -1,252 +1,223 @@
 import pyautogui
-import requests
 import time
 import json
 import os
 import pyperclip
+import logging
+import schedule
+import argparse
+
+from weather_service import get_weather_data
 
 # 设置pyautogui的暂停时间和紧急停止功能
 pyautogui.PAUSE = 0.5
 pyautogui.FAILSAFE = True
 
+# --- 配置区域常量 ---
+SCREEN_WIDTH, SCREEN_HEIGHT = pyautogui.size()
 
-def get_weather_data(city_name, nickname, api_key, api_host, location_id):
-    """
-    获取指定城市的天气数据并生成天气预报消息
-    
-    :param city_name: 城市名称
-    :param nickname: 好友昵称
-    :param api_key: 和风天气API密钥
-    :param api_host: 和风天气API主机地址
-    :param location_id: 城市ID
-    :return: 格式化的天气预报消息字符串
-    """
-    print(f"  > 正在为 {city_name} (ID: {location_id}) 获取天气...")
-    try:
-        # 构造天气API请求URL
-        weather_url = f"https://{api_host}/v7/weather/3d?location={location_id}&key={api_key}&lang=zh&unit=m"
-        res_weather = requests.get(weather_url, timeout=5)
-        res_weather.raise_for_status()
-        data_weather = res_weather.json()
+# 1. 顶栏区域：用于寻找右上角的“私信”图标
+# 建议：保持原状，除非您发现点击不准
+REGION_TOP_BAR = (int(SCREEN_WIDTH * 0.70), 0, int(SCREEN_WIDTH * 0.15), int(SCREEN_HEIGHT * 0.12))
 
-        # 检查API响应状态码
-        if data_weather.get("code") == "200":
-            # 提取今日天气信息
-            today_weather = data_weather['daily'][0]
-            text_day, text_night = today_weather['textDay'], today_weather['textNight']
-            temp_max, temp_min = today_weather['tempMax'], today_weather['tempMin']
-            wind_dir, wind_scale = today_weather['windDirDay'], today_weather['windScaleDay']
+# 2. 好友列表区域 (屏幕右侧列表)
+# 这是鼠标悬停和查找头像的关键区域
+REGION_FRIEND_LIST = (int(SCREEN_WIDTH * 0.75), int(SCREEN_HEIGHT * 0.10), int(SCREEN_WIDTH * 0.25),
+                      int(SCREEN_HEIGHT * 0.85))
 
-            # 构造基础天气预报消息
-            weather_report = f"Hi {nickname}，你所在的{city_name}今天白天{text_day}，晚上{text_night}。"
-            weather_report += f"气温是{temp_min}到{temp_max}℃，{wind_dir}{wind_scale}级。"
+# 3. 聊天窗口底部区域 (发送按钮)
+REGION_CHAT_WINDOW_BOTTOM = (int(SCREEN_WIDTH * 0.30), int(SCREEN_HEIGHT * 0.85), int(SCREEN_WIDTH * 0.65),
+                             int(SCREEN_HEIGHT * 0.10))
 
-            # 根据天气条件添加特殊提醒
-            if "雨" in text_day or "雨" in text_night:
-                weather_report += " 出门记得带伞哦！"
-            elif int(temp_min) < 5:
-                weather_report += " 天气很冷，注意保暖呀！"
-            elif int(temp_max) > 28:
-                weather_report += " 天气炎热，小心中暑~"
-            else:
-                weather_report += " 祝你拥有愉快的一天！"
-            return weather_report
-        else:
-            print(f"  [错误] 获取天气失败。返回码: {data_weather.get('code')}")
-            return None
-    except Exception as e:
-        print(f"  [错误] 获取天气时发生网络错误: {e}")
-        return None
+# 4. 聊天窗口顶部区域 (退出会话按钮)
+REGION_CHAT_WINDOW_TOP = (int(SCREEN_WIDTH * 0.70), int(SCREEN_HEIGHT * 0.10), int(SCREEN_WIDTH * 0.25),
+                          int(SCREEN_HEIGHT * 0.10))
 
 
-def find_and_click(image_path, confidence=0.8, timeout=5):
+def setup_logging():
+    """配置日志系统"""
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # 移除旧的处理器，防止重复打印
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    # 文件日志
+    file_handler = logging.FileHandler('run.log', mode='a', encoding='utf-8')
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+    # 控制台日志
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+
+def find_and_click(image_path, confidence=0.8, timeout=5, region=None):
     """
     在屏幕上查找图像并点击
-    
-    :param image_path: 要查找的图像路径
-    :param confidence: 图像匹配的置信度阈值
-    :param timeout: 查找超时时间（秒）
-    :return: 成功找到并点击返回True，否则返回False
     """
     start_time = time.time()
-    print(f"  > 正在寻找 '{image_path}'...")
+    logging.info(f"正在 {(('区域 ' + str(region)) if region else '全屏')} 寻找 '{image_path}'...")
     while time.time() - start_time < timeout:
         try:
-            location = pyautogui.locateCenterOnScreen(image_path, confidence=confidence)
+            # 查找图片中心点
+            location = pyautogui.locateCenterOnScreen(image_path, confidence=confidence, region=region)
             if location:
-                print(f"  > 找到 '{image_path}' 在 {location}，准备点击。")
+                logging.info(f"✅ 找到 '{image_path}' 在 {location}，准备点击。")
                 pyautogui.click(location)
                 return True
         except pyautogui.PyAutoGUIException:
             pass
-        time.sleep(1)
-    print(f"  [失败] 超时！在 {timeout} 秒内未在屏幕上找到图片: '{image_path}'")
+        time.sleep(0.5)  # 缩短单次循环间隔，提高响应速度
+    logging.warning(f"❌ 超时！在 {timeout} 秒内未找到图片: '{image_path}'")
     return False
 
 
-def scroll_by_dragging(scroll_bar_path, distance=200, duration=0.5):
+def scroll_friend_list(amount=-200):
     """
-    通过拖动滚动条来滚动窗口。
-
-    :param scroll_bar_path: 滚动条图像的路径
-    :param distance: 拖动的距离（正数向下，负数向上），默认值改为 200
-    :param duration: 拖动的持续时间（秒）
+    在好友列表区域执行纯滚动操作 (无点击)
+    :param amount: 滚动量，负数表示向下滚动。建议设置小一点(-200)以防跳过。
     """
-    # 定位滚动条
-    scroll_bar_location = pyautogui.locateCenterOnScreen(scroll_bar_path, confidence=0.8)
-    if not scroll_bar_location:
-        print(f"  [失败] 未能找到滚动条: '{scroll_bar_path}'")
-        return False
+    # 计算好友列表区域的中心点
+    x, y, width, height = REGION_FRIEND_LIST
+    center_x = x + width // 2
+    center_y = y + height // 2
 
-    # 移动鼠标到滚动条上
-    pyautogui.moveTo(scroll_bar_location)
+    # 1. 将鼠标悬停在列表中心
+    pyautogui.moveTo(center_x, center_y)
 
-    # 点击滚动条以选中它
-    pyautogui.click()
+    # 【关键修改】增加悬停等待时间
+    # 许多UI需要鼠标停留一小会儿才会把滚动焦点切换过去
+    time.sleep(0.8)
 
-    # 按下鼠标左键
-    pyautogui.mouseDown()
-
-    # 拖动鼠标
-    pyautogui.moveRel(0, distance, duration=duration)
-
-    # 释放鼠标左键
-    pyautogui.mouseUp()
-
-    print(f"  > 滚动条已拖动 {distance} 像素。")
-    return True
+    # 2. 执行滚动
+    pyautogui.scroll(amount)
+    logging.info(f"⬇️ 在列表中心悬停并滚动了 {amount} 单位。")
 
 
-def find_friend_with_scrolling(friend_avatar_path, scroll_bar_path, max_scrolls=10):
+def find_friend_with_scrolling(friend_avatar_path, max_scrolls=20):
     """
-    通过滚动查找好友头像并点击
-    
-    :param friend_avatar_path: 好友头像图像路径
-    :param scroll_bar_path: 滚动条图像路径
-    :param max_scrolls: 最大滚动次数
-    :return: 成功找到并点击好友头像返回True，否则返回False
+    通过“查找 -> 滚动 -> 查找”的循环来寻找好友
     """
-    print(f"  > 开始滚动查找好友: {friend_avatar_path}")
+    logging.info(f"🔍 开始在列表查找好友头像: {friend_avatar_path}")
+
     for i in range(max_scrolls):
-        if find_and_click(friend_avatar_path, confidence=0.75, timeout=1):
+        # 1. 尝试在当前视野中查找好友
+        # 【关键修改】timeout 增加到 3 秒。
+        # 给程序足够的时间“看清”当前屏幕，防止因为识别慢而错过
+        if find_and_click(friend_avatar_path, confidence=0.75, timeout=3, region=REGION_FRIEND_LIST):
             return True
 
-        print(f"  > 页面{i + 1}未找到，尝试拖动滚动条...")
+        logging.info(f"📄 第 {i + 1} 页未找到，正在滚动...")
 
-        # 尝试拖动滚动条，这里可以指定 distance 参数值
-        if not scroll_by_dragging(scroll_bar_path, distance=200, duration=0.5):
-            print("  [警告] 拖动滚动条失败，使用默认滚动。")
-            pyautogui.scroll(-200)  # 如果拖动失败，使用默认滚动
+        # 2. 如果没找到，就滚动列表
+        scroll_friend_list(amount=-200)  # 减小幅度，防止滚过头
 
-        time.sleep(1)
+        # 3. 给时间让界面动画完成并完全静止
+        # 【关键修改】增加到 2 秒，确保列表完全停稳，图像不再模糊
+        time.sleep(2)
 
-    print(f"  [致命失败] 在滚动 {max_scrolls} 次后仍未找到好友: {friend_avatar_path}")
+    logging.error(f"❌ 已滚动 {max_scrolls} 次，仍未找到好友头像: {friend_avatar_path}")
     return False
 
 
-def main():
-    """
-    主函数：控制整个自动化流程
-    """
+def run_bot_task():
+    logging.info("🚀 --- 开始执行自动化任务 ---")
     config_file = 'config.json'
     if not os.path.exists(config_file):
-        print("[程序终止] 错误：找不到 config.json 配置文件！请先运行 config_manager_gui.py 来生成它。")
+        logging.critical("错误：找不到 config.json 配置文件！")
         return
 
     try:
         with open(config_file, 'r', encoding='utf-8') as f:
             config = json.load(f)
         api_host = config.get('api_host')
-        api_key = config.get('api_key')
+        api_key = config.get('api_key') or os.environ.get('DOUYIN_WEATHER_API_KEY')
+        message_template = config.get('message_template', None)
         friends_list = config.get('friends', [])
     except Exception as e:
-        print(f"[程序终止] 读取配置文件失败: {e}")
+        logging.critical(f"读取配置文件失败: {e}")
         return
 
-    if not api_key or not friends_list or not api_host:
-        print("[程序终止] 错误：配置文件中的API Host、API Key或好友列表为空！请运行GUI程序进行配置。")
+    if not api_key or not friends_list:
+        logging.critical("配置错误：缺少 API Key 或 好友列表。")
         return
 
-    print("=" * 50)
-    print("     抖音天气助手 v4.3 (最终流程版) - 自动化程序     ")
-    print("=" * 50)
-    print("请在10秒内将鼠标移动到抖音PC客户端内，并确保其为活动窗口...")
-    for i in range(10, 0, -1):
-        print(f"倒计时 {i} 秒...")
-        time.sleep(1)
-
-    scroll_bar_path = 'control_images/douyin_scroll_bar.png'  # 确保该路径正确指向滚动条图像
+    logging.info("=" * 50)
+    logging.info("⏳ 请在 10 秒内切换到抖音 PC 客户端窗口...")
+    time.sleep(10)
 
     # 遍历处理每个好友
     for friend in friends_list:
-        # 兼容不同版本的配置文件格式
         nickname = friend['nickname']
+        # 兼容新旧配置格式
+        city_name = friend.get('city_name', f"ID:{friend.get('city')}")
+        location_id = friend.get('location_id', friend.get('city'))
+        avatar_path = friend.get('avatar_image', '')
 
-        # 检查是否为新格式(V4.1及以上)
-        if 'city_name' in friend and 'location_id' in friend:
-            city_name = friend['city_name']
-            location_id = friend['location_id']
-            avatar_path = friend.get('avatar_image', '')
-        # 检查是否为旧格式(V4.0及以前)
-        elif 'city' in friend:
-            # 旧格式使用城市ID作为city字段
-            city_name = f"城市(ID: {friend['city']})"
-            location_id = friend['city']
-            avatar_path = friend.get('avatar_image', '')
-        else:
-            print(f"  [跳过] 好友 {nickname} 的配置格式不正确。")
-            continue
+        logging.info(f"👉 ---=> 正在处理: {nickname} <=---")
 
-        print(f"\n---=> 开始处理好友: 【{nickname}】 <=---")
-
-        if avatar_path and not os.path.exists(avatar_path):
-            print(f"  [跳过] 找不到头像文件: {avatar_path}。")
-            continue
-
-        # 每次循环都点击私信图标，确保好友列表是打开状态
-        print("  > 正在点击\"私信\"图标以确保列表可见...")
-        if not find_and_click('control_images/douyin_sixin_icon.png', timeout=3):
-            print("  [严重错误] 找不到抖音的\"私信\"图标，任务无法继续。")
+        # 1. 确保私信列表是打开的 (点击右上角私信图标)
+        # 增加 region 限制，防止点错
+        if not find_and_click('control_images/douyin_sixin_icon.png', timeout=5, region=REGION_TOP_BAR):
+            logging.critical("无法找到“私信”图标，无法进入好友列表，任务停止。")
             break
         time.sleep(2)
 
-        # 只有当有头像路径时才尝试查找好友
+        # 2. 查找好友 (核心查找逻辑)
         if avatar_path:
-            if not find_friend_with_scrolling(avatar_path, scroll_bar_path):
-                print(f"  [跳过] 未能找到好友 {nickname}，将处理下一位。")
+            if not find_friend_with_scrolling(avatar_path):
+                logging.warning(f"⚠️ 跳过：无法在列表中找到好友 {nickname}。")
+                # 为了防止死循环或卡住，找不到好友时我们还是尝试退出一下当前的 potential 状态（虽然理论上没进详情）
+                # 但这里我们选择直接 continue 去找下一个，或者 break
                 continue
-        time.sleep(3)
+        else:
+            logging.warning(f"⚠️ 跳过：好友 {nickname} 未配置头像路径。")
+            continue
 
-        weather_message = get_weather_data(city_name, nickname, api_key, api_host, location_id)
+        # 找到好友并点击后，稍微等待进入聊天界面
+        time.sleep(2)
+
+        # 3. 获取天气并发送
+        weather_message = get_weather_data(city_name, nickname, api_key, api_host, location_id, message_template)
         if weather_message:
-            print(f"  > 生成天气播报: {weather_message}")
-            print("  > 正在输入消息 (使用剪贴板粘贴)...")
-
+            logging.info("正在粘贴并发送消息...")
             pyperclip.copy(weather_message)
             pyautogui.hotkey('ctrl', 'v')
-            time.sleep(1)
+            time.sleep(1.5)
 
-            print("  > 正在点击\"发送\"按钮...")
-            if find_and_click('control_images/douyin_send_button.png'):
-                print(f"  > 为 {nickname} 发送消息成功。")
+            if find_and_click('control_images/douyin_send_button.png', region=REGION_CHAT_WINDOW_BOTTOM):
+                logging.info(f"✅ 发送成功 -> {nickname}")
                 time.sleep(1)
 
-                # --- (核心改动) --- 发送成功后，点击"退出会话"以返回列表
-                print("  > 正在退出当前会话...")
-                if not find_and_click('control_images/douyin_exit_chat_button.png'):
-                    print("  [严重警告] 未能找到\"退出会话\"按钮！后续好友可能无法处理。")
-                    break  # 如果无法退出，就终止整个任务，防止出错
+                # 4. 退出会话 (关键：返回列表以便处理下一个)
+                if not find_and_click('control_images/douyin_exit_chat_button.png', region=REGION_CHAT_WINDOW_TOP):
+                    logging.error("⚠️ 警告：未能点击“退出会话”按钮，可能会影响下一位好友的查找。")
             else:
-                print(f"  [警告] 为 {nickname} 发送失败：未能点击发送按钮！")
-        else:
-            print(f"  [跳过] 因无法获取天气信息，未能向 {nickname} 发送。")
+                logging.warning("❌ 发送失败：找不到“发送”按钮。")
 
-        print(f"  > 【{nickname}】处理完毕。")
-        time.sleep(2)  # 退出会话后稍作等待，准备处理下一个
+        time.sleep(3)  # 缓冲时间，准备下一位
 
-    print("\n" + "=" * 50)
-    print(" 所有好友处理完毕，任务圆满结束！ ")
-    print("=" * 50)
+    logging.info("🎉 所有任务执行完毕。")
+
+
+def main():
+    setup_logging()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--now', action='store_true', help='立即执行')
+    args = parser.parse_args()
+
+    if args.now:
+        run_bot_task()
+    else:
+        logging.info("⏰ 程序已启动，等待每日 08:00 调度执行...")
+        schedule.every().day.at("08:00").do(run_bot_task)
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
 
 
 if __name__ == "__main__":

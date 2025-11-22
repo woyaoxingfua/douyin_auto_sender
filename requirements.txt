@@ -1,0 +1,8 @@
+pyautogui
+requests
+pyperclip
+schedule
+tenacity
+opencv-python
+pillow
+tk

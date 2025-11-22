@@ -25,6 +25,7 @@ class ConfigManager(tk.Tk):
         self.friends_data = []
         self.api_key = tk.StringVar()
         self.api_host = tk.StringVar()
+        self.message_template = tk.StringVar() # 新增：消息模板
         self.selected_city_info = None
 
         self.create_widgets()
@@ -53,13 +54,23 @@ class ConfigManager(tk.Tk):
         api_frame = ttk.LabelFrame(right_frame, text="1. 天气API配置", padding="10")
         api_frame.pack(fill="x")
         ttk.Label(api_frame, text="API Host:").grid(row=0, column=0, sticky="w", pady=5)
-        ttk.Entry(api_frame, textvariable=self.api_host, width=40).grid(row=0, column=1, sticky="ew")
+        ttk.Entry(api_frame, textvariable=self.api_host, width=30).grid(row=0, column=1, sticky="ew")
         ttk.Label(api_frame, text="API Key:").grid(row=1, column=0, sticky="w", pady=5)
-        ttk.Entry(api_frame, textvariable=self.api_key, width=40).grid(row=1, column=1, sticky="ew")
+        ttk.Entry(api_frame, textvariable=self.api_key, width=30).grid(row=1, column=1, sticky="ew")
+        ttk.Button(api_frame, text="测试连接", command=self.test_api_connectivity).grid(row=1, column=2, sticky="e", padx=(5,0)) # 新增测试连接按钮
         api_frame.grid_columnconfigure(1, weight=1)
 
+        # 消息模板配置区域
+        template_frame = ttk.LabelFrame(right_frame, text="2. 消息模板配置", padding="10")
+        template_frame.pack(fill="x", pady=10)
+        ttk.Label(template_frame, text="天气播报模板:").pack(anchor="w")
+        self.message_template_text = tk.Text(template_frame, height=5, width=40)
+        self.message_template_text.pack(fill="x", expand=True, pady=5)
+        ttk.Label(template_frame, text="可用变量: {nickname}, {city_name}, {text_day}, {text_night}, {temp_max}, {temp_min}, {wind_dir}, {wind_scale}").pack(anchor="w", pady=2)
+        template_frame.grid_columnconfigure(0, weight=1) # 使Text区域可以扩展
+
         # 城市ID查询区域
-        city_frame = ttk.LabelFrame(right_frame, text="2. 查找城市ID", padding="10")
+        city_frame = ttk.LabelFrame(right_frame, text="3. 查找城市ID", padding="10")
         city_frame.pack(fill="x", pady=10)
         ttk.Label(city_frame, text="输入城市名:").grid(row=0, column=0, padx=5)
         self.city_search_entry = ttk.Entry(city_frame, width=15)
@@ -69,7 +80,7 @@ class ConfigManager(tk.Tk):
         self.city_results_listbox.grid(row=1, column=0, columnspan=3, sticky="ew", pady=5)
 
         # 好友信息编辑区域
-        info_frame = ttk.LabelFrame(right_frame, text="3. 编辑好友信息", padding="10")
+        info_frame = ttk.LabelFrame(right_frame, text="4. 编辑好友信息", padding="10")
         info_frame.pack(fill="both", expand=True, pady=10)
         ttk.Label(info_frame, text="好友昵称:").grid(row=0, column=0, sticky="w", pady=5)
         self.nickname_entry = ttk.Entry(info_frame)
@@ -94,6 +105,38 @@ class ConfigManager(tk.Tk):
         ttk.Button(right_frame, text="️ 保存所有配置并退出", command=self.save_and_quit, style="Accent.TButton").pack(side="bottom", fill="x", ipady=5)
         self.style = ttk.Style(self)
         self.style.configure("Accent.TButton", foreground="white", background="dodgerblue")
+
+    def test_api_connectivity(self):
+        """
+        测试和风天气API的连接性
+        """
+        api_host = self.api_host.get()
+        api_key = self.api_key.get()
+
+        if not (api_host and api_key):
+            messagebox.showwarning("信息不完整", "请先填写API Host和API Key！")
+            return
+
+        messagebox.showinfo("测试连接", "正在尝试连接和风天气API，请稍候...")
+        try:
+            # 使用一个已知城市（如北京的Location ID）进行测试查询
+            test_location_id = "101010100"  # 北京的Location ID
+            test_url = f"https://{api_host}/v7/weather/now?location={test_location_id}&key={api_key}"
+            response = requests.get(test_url, timeout=5)
+            response.raise_for_status()  # 如果请求失败（非2xx状态码），则抛出HTTPError
+
+            data = response.json()
+            if data.get("code") == "200":
+                messagebox.showinfo("测试成功", "和风天气API连接成功！")
+            else:
+                messagebox.showerror("测试失败", f"API返回错误码: {data.get('code')}。\n请检查API Key和Host是否正确。")
+        except requests.exceptions.Timeout:
+            messagebox.showerror("测试失败", "连接超时，请检查网络或API Host是否可达。")
+        except requests.exceptions.RequestException as e:
+            messagebox.showerror("测试失败", f"连接和风天气API时发生错误: {e}\n请检查API Host是否正确，以及网络连接。")
+        except Exception as e:
+            messagebox.showerror("测试失败", f"发生未知错误: {e}")
+
 
     def search_city_id(self):
         """
@@ -271,8 +314,14 @@ class ConfigManager(tk.Tk):
                 config = json.load(f)
                 self.api_host.set(config.get('api_host', ''))
                 self.api_key.set(config.get('api_key', ''))
+                self.message_template.set(config.get('message_template', '')) # 新增：加载消息模板
                 self.friends_data = config.get('friends', [])
                 self.refresh_friends_listbox()
+        # 如果配置文件不存在或模板为空，设置默认模板
+        if not self.message_template.get():
+            self.message_template.set("Hi {nickname}，你所在的{city_name}今天白天{text_day}，晚上{text_night}。\n气温是{temp_min}到{temp_max}℃，{wind_dir}{wind_scale}级。")
+        self.message_template_text.delete(1.0, tk.END) # 清空旧内容
+        self.message_template_text.insert(tk.END, self.message_template.get()) # 插入加载或默认模板
 
     def save_and_quit(self):
         """
@@ -281,6 +330,7 @@ class ConfigManager(tk.Tk):
         config_data = {
             'api_host': self.api_host.get(),
             'api_key': self.api_key.get(),
+            'message_template': self.message_template_text.get(1.0, tk.END).strip(), # 新增：保存消息模板
             'friends': self.friends_data
         }
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
