@@ -1,12 +1,12 @@
 import requests
 import logging
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 from requests.exceptions import RequestException
 
 logger = logging.getLogger(__name__)
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2), reraise=True,
-       retry=(RequestException))
+       retry=retry_if_exception_type(RequestException))
 def get_weather_data(city_name, nickname, api_key, api_host, location_id, message_template=None):
     """
     获取指定城市的天气数据并生成天气预报消息
@@ -31,18 +31,24 @@ def get_weather_data(city_name, nickname, api_key, api_host, location_id, messag
 
     try:
         # 构造天气API请求URL
-        weather_url = f"https://{api_host}/v7/weather/3d?location={location_id}&key={api_key}&lang=zh&unit=m"
-        res_weather = requests.get(weather_url, timeout=5)
+        weather_url = f"https://{api_host}/v7/weather/3d"
+        params = {
+            "location": location_id,
+            "key": api_key,
+            "lang": "zh",
+            "unit": "m",
+        }
+        res_weather = requests.get(weather_url, params=params, timeout=5)
         res_weather.raise_for_status()
         data_weather = res_weather.json()
 
         # 检查API响应状态码
-        if data_weather.get("code") == "200":
+        if data_weather.get("code") == "200" and data_weather.get("daily"):
             # 提取今日天气信息
             today_weather = data_weather['daily'][0]
-            text_day, text_night = today_weather['textDay'], today_weather['textNight']
-            temp_max, temp_min = today_weather['tempMax'], today_weather['tempMin']
-            wind_dir, wind_scale = today_weather['windDirDay'], today_weather['windScaleDay']
+            text_day, text_night = today_weather.get('textDay', ''), today_weather.get('textNight', '')
+            temp_max, temp_min = today_weather.get('tempMax', ''), today_weather.get('tempMin', '')
+            wind_dir, wind_scale = today_weather.get('windDirDay', ''), today_weather.get('windScaleDay', '')
 
             # 将所有天气数据和昵称、城市名放入一个字典，用于模板格式化
             template_data = {
@@ -56,14 +62,21 @@ def get_weather_data(city_name, nickname, api_key, api_host, location_id, messag
                 "wind_scale": wind_scale
             }
             # 构造基础天气预报消息
-            weather_report = final_template.format(**template_data)
+            try:
+                weather_report = final_template.format(**template_data)
+            except KeyError as e:
+                logger.error(f"消息模板变量不存在: {e}，将改用默认模板。")
+                weather_report = default_template.format(**template_data)
 
             # 根据天气条件添加特殊提醒
+            temp_min_int = _safe_int(temp_min)
+            temp_max_int = _safe_int(temp_max)
+
             if "雨" in text_day or "雨" in text_night:
                 weather_report += " 出门记得带伞哦！"
-            elif int(temp_min) < 5:
+            elif temp_min_int is not None and temp_min_int < 5:
                 weather_report += " 天气很冷，注意保暖呀！"
-            elif int(temp_max) > 28:
+            elif temp_max_int is not None and temp_max_int > 28:
                 weather_report += " 天气炎热，小心中暑~"
             else:
                 weather_report += " 祝你拥有愉快的一天！"
@@ -74,7 +87,14 @@ def get_weather_data(city_name, nickname, api_key, api_host, location_id, messag
     except RequestException as e: # Catch RequestException specifically for tenacity retry
         logger.error(f"获取天气时发生网络错误或API请求失败: {e}")
         raise # Re-raise the exception for tenacity to catch
-    except Exception as e:
-        logger.error(f"获取天气时发生未知错误: {e}")
+    except (KeyError, ValueError, TypeError) as e:
+        logger.error(f"解析天气数据失败: {e}")
+        return None
+
+
+def _safe_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
         return None
 

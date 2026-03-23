@@ -14,6 +14,7 @@
     *   **自定义消息模板**：在GUI中自由编辑天气播报文案，支持多种变量，让您的问候与众不同。
 *   **健壮性与稳定性增强**：
     *   **专业日志系统**：用 `logging` 模块取代了简单的 `print`，所有操作和潜在错误都会记录到 `run.log` 文件中，便于追溯和调试。
+    *   **日志滚动**：`run.log` 自动轮转，避免长期运行导致日志文件无限增大。
     *   **网络重试机制**：为天气API请求增加了 `tenacity` 库支持的重试功能，有效应对瞬时网络波动。
     *   **区域化图像识别**：限定 `pyautogui` 在屏幕的特定区域（如右侧列表、右下角聊天区）寻找图像，大幅提升识别速度和准确性。
     *   **优化滚动逻辑**：采用“滚轮滚动”优先、“拖拽滚动条”为备用的双重滚动策略，提高了在好友列表滚动的成功率。
@@ -29,6 +30,7 @@ douyin_auto_sender/
 ├── douyin_bot.py               # (主程序) 自动化机器人，启动后自动调度任务
 ├── config_manager_gui.py       # (配置工具) 图形化配置后台
 ├── weather_service.py          # (模块) 封装了天气数据获取的逻辑
+├── config_utils.py             # (模块) 配置文件读写、兼容和校验
 │
 ├── config.json                 # 配置文件 (由GUI生成和管理)
 ├── requirements.txt            # 项目依赖库
@@ -57,6 +59,13 @@ douyin_auto_sender/
 pip install -r requirements.txt
 ```
 这会安装 `pyautogui`, `requests`, `opencv-python`, `pyperclip`, `tenacity`, `schedule` 等所有必要的库。
+
+#### 3\. 可选：运行快速自检
+
+```bash
+python -m py_compile *.py
+pytest -q
+```
 
 ## 📖 使用指南
 

@@ -1,14 +1,23 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-import json
 import os
 import requests
+from typing import Dict, List, Optional, cast
 
-CONFIG_FILE = 'config.json'
-DEFAULT_AVATAR_DIR = 'friend_avatars'
+from config_utils import (
+    CONFIG_PATH,
+    DEFAULT_MESSAGE_TEMPLATE,
+    load_config,
+    normalize_config,
+    save_config,
+    project_path,
+)
+
+CONFIG_FILE = CONFIG_PATH
+DEFAULT_AVATAR_DIR = project_path('friend_avatars')
 # 确保必要的目录存在
 os.makedirs(DEFAULT_AVATAR_DIR, exist_ok=True)
-os.makedirs('control_images', exist_ok=True)
+os.makedirs(project_path('control_images'), exist_ok=True)
 
 
 class ConfigManager(tk.Tk):
@@ -22,11 +31,12 @@ class ConfigManager(tk.Tk):
         self.geometry("800x600")
 
         # 存储好友数据和API配置
-        self.friends_data = []
+        self.friends_data: List[Dict[str, str]] = []
         self.api_key = tk.StringVar()
         self.api_host = tk.StringVar()
         self.message_template = tk.StringVar() # 新增：消息模板
-        self.selected_city_info = None
+        self.selected_city_info: Optional[Dict[str, str]] = None
+        self.city_lookup_results: List[Dict[str, str]] = []
 
         self.create_widgets()
         self.load_config()
@@ -134,8 +144,6 @@ class ConfigManager(tk.Tk):
             messagebox.showerror("测试失败", "连接超时，请检查网络或API Host是否可达。")
         except requests.exceptions.RequestException as e:
             messagebox.showerror("测试失败", f"连接和风天气API时发生错误: {e}\n请检查API Host是否正确，以及网络连接。")
-        except Exception as e:
-            messagebox.showerror("测试失败", f"发生未知错误: {e}")
 
 
     def search_city_id(self):
@@ -166,23 +174,23 @@ class ConfigManager(tk.Tk):
             data = response.json()
 
             if data.get("code") == "200" and data.get("location"):
-                self.city_lookup_results = data["location"]
+                self.city_lookup_results = cast(List[Dict[str, str]], data["location"])
                 for i, loc in enumerate(self.city_lookup_results):
                     display_text = f"{loc['name']}, {loc['adm1']}, {loc['country']} | ID: {loc['id']}"
                     self.city_results_listbox.insert(tk.END, display_text)
                 self.city_results_listbox.bind('<<ListboxSelect>>', lambda e: self.on_city_result_select())
             else:
                 messagebox.showinfo("查询结果", f"未找到城市 '{city_name}'。返回码: {data.get('code')}")
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             messagebox.showerror("网络错误", f"查询城市ID时出错: {e}")
 
     def on_city_result_select(self):
         """
         当在城市查询结果中选择一个城市时触发
         """
-        selection_indices = self.city_results_listbox.curselection()
-        if not selection_indices: return
-        index = selection_indices[0]
+        index = self._selected_index(self.city_results_listbox)
+        if index is None:
+            return
         self.selected_city_info = self.city_lookup_results[index]
         self.selected_city_label.config(text=f"{self.selected_city_info['name']} (ID: {self.selected_city_info['id']})")
 
@@ -191,9 +199,9 @@ class ConfigManager(tk.Tk):
         当在好友列表中选择一个好友时触发
         将选中的好友信息加载到编辑区域
         """
-        selection_indices = self.friends_listbox.curselection()
-        if not selection_indices: return
-        index = selection_indices[0]
+        index = self._selected_index(self.friends_listbox)
+        if index is None:
+            return
         friend = self.friends_data[index]
         self.clear_entries()
         self.nickname_entry.insert(0, friend['nickname'])
@@ -211,10 +219,13 @@ class ConfigManager(tk.Tk):
             filetypes=(("PNG files", "*.png"), ("All files", "*.*"))
         )
         if filepath:
-            relative_path = os.path.relpath(filepath).replace("\\", "/")
-            if ".." in relative_path:
+            absolute_path = os.path.abspath(filepath)
+            avatar_root = os.path.abspath(DEFAULT_AVATAR_DIR)
+
+            if os.path.commonpath([absolute_path, avatar_root]) != avatar_root:
                 messagebox.showerror("路径错误", "请将头像图片保存在项目的 friend_avatars 文件夹内再选择！")
                 return
+            relative_path = os.path.relpath(absolute_path, project_path()).replace("\\", "/")
             self.avatar_path_label.config(text=relative_path)
     
     def _get_info_from_form(self):
@@ -240,6 +251,10 @@ class ConfigManager(tk.Tk):
         nickname, avatar, city_info = self._get_info_from_form()
         if not nickname: return
         
+        if any(friend.get('nickname') == nickname for friend in self.friends_data):
+            messagebox.showwarning("重复昵称", f"已存在昵称为 '{nickname}' 的好友，请使用“更新选中好友”或改名后再添加。")
+            return
+
         new_friend = {
             "nickname": nickname,
             "city_name": city_info['name'],
@@ -254,15 +269,14 @@ class ConfigManager(tk.Tk):
         """
         更新选中的好友信息
         """
-        selection_indices = self.friends_listbox.curselection()
-        if not selection_indices:
+        index = self._selected_index(self.friends_listbox)
+        if index is None:
             messagebox.showwarning("未选择", "请先在左侧列表选择一个要更新的好友！")
             return
         
         nickname, avatar, city_info = self._get_info_from_form()
         if not nickname: return
 
-        index = selection_indices[0]
         self.friends_data[index] = {
             "nickname": nickname, "city_name": city_info['name'],
             "location_id": city_info['id'], "avatar_image": avatar
@@ -275,12 +289,12 @@ class ConfigManager(tk.Tk):
         """
         删除选中的好友
         """
-        selection_indices = self.friends_listbox.curselection()
-        if not selection_indices:
+        index = self._selected_index(self.friends_listbox)
+        if index is None:
             messagebox.showwarning("未选择", "请先在左侧列表选择一个要删除的好友！")
             return
-        if messagebox.askyesno("确认删除", f"确定要删除好友 '{self.friends_data[selection_indices[0]]['nickname']}' 吗？"):
-            del self.friends_data[selection_indices[0]]
+        if messagebox.askyesno("确认删除", f"确定要删除好友 '{self.friends_data[index]['nickname']}' 吗？"):
+            del self.friends_data[index]
             self.refresh_friends_listbox()
             self.clear_entries()
 
@@ -309,17 +323,25 @@ class ConfigManager(tk.Tk):
         """
         加载配置文件
         """
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                self.api_host.set(config.get('api_host', ''))
-                self.api_key.set(config.get('api_key', ''))
-                self.message_template.set(config.get('message_template', '')) # 新增：加载消息模板
-                self.friends_data = config.get('friends', [])
-                self.refresh_friends_listbox()
+        try:
+            raw_config = load_config(CONFIG_FILE)
+        except ValueError as e:
+            messagebox.showerror("配置文件错误", f"读取配置失败：{e}\n将使用空配置启动。")
+            raw_config = {}
+
+        config, warnings = normalize_config(raw_config)
+        if warnings:
+            messagebox.showwarning("配置兼容提示", "\n".join(warnings))
+
+        self.api_host.set(config.get('api_host', ''))
+        self.api_key.set(config.get('api_key', ''))
+        self.message_template.set(config.get('message_template', ''))
+        self.friends_data = cast(List[Dict[str, str]], config.get('friends', []))
+        self.refresh_friends_listbox()
+
         # 如果配置文件不存在或模板为空，设置默认模板
         if not self.message_template.get():
-            self.message_template.set("Hi {nickname}，你所在的{city_name}今天白天{text_day}，晚上{text_night}。\n气温是{temp_min}到{temp_max}℃，{wind_dir}{wind_scale}级。")
+            self.message_template.set(DEFAULT_MESSAGE_TEMPLATE)
         self.message_template_text.delete(1.0, tk.END) # 清空旧内容
         self.message_template_text.insert(tk.END, self.message_template.get()) # 插入加载或默认模板
 
@@ -327,14 +349,28 @@ class ConfigManager(tk.Tk):
         """
         保存配置并退出程序
         """
+        api_host = self.api_host.get().strip()
+        if not api_host:
+            messagebox.showwarning("信息不完整", "请先填写 API Host。")
+            return
+
+        if not self.friends_data:
+            if not messagebox.askyesno("好友列表为空", "当前没有配置任何好友，仍要保存并退出吗？"):
+                return
+
         config_data = {
-            'api_host': self.api_host.get(),
-            'api_key': self.api_key.get(),
+            'api_host': api_host,
+            'api_key': self.api_key.get().strip(),
             'message_template': self.message_template_text.get(1.0, tk.END).strip(), # 新增：保存消息模板
             'friends': self.friends_data
         }
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+        try:
+            save_config(config_data, CONFIG_FILE)
+        except OSError as e:
+            messagebox.showerror("保存失败", f"写入配置文件失败: {e}")
+            return
+
         messagebox.showinfo("成功", f"配置已成功保存到 {CONFIG_FILE}")
         self.destroy()
 
@@ -346,6 +382,12 @@ class ConfigManager(tk.Tk):
         self.selected_city_label.config(text="(请先从上方查询并选择)")
         self.avatar_path_label.config(text="未选择")
         self.selected_city_info = None
+
+    def _selected_index(self, listbox: tk.Listbox) -> Optional[int]:
+        selection = listbox.curselection()
+        if not selection:
+            return None
+        return int(selection[0])
 
 if __name__ == "__main__":
     app = ConfigManager()

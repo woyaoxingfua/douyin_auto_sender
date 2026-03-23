@@ -1,13 +1,15 @@
 import pyautogui
 import time
-import json
 import os
 import pyperclip
 import logging
 import schedule
 import argparse
+from logging.handlers import RotatingFileHandler
+from requests.exceptions import RequestException
 
 from weather_service import get_weather_data
+from config_utils import load_config, normalize_config, validate_runtime_config, project_path
 
 # 设置pyautogui的暂停时间和紧急停止功能
 pyautogui.PAUSE = 0.5
@@ -43,8 +45,8 @@ def setup_logging():
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    # 文件日志
-    file_handler = logging.FileHandler('run.log', mode='a', encoding='utf-8')
+    # 文件日志（滚动，防止长期运行导致日志无限膨胀）
+    file_handler = RotatingFileHandler(project_path('run.log'), maxBytes=1_000_000, backupCount=3, encoding='utf-8')
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 
     # 控制台日志
@@ -124,27 +126,50 @@ def find_friend_with_scrolling(friend_avatar_path, max_scrolls=20):
     return False
 
 
+def _control_image_path(file_name):
+    return project_path('control_images', file_name)
+
+
+def _load_runtime_config():
+    try:
+        raw_config = load_config()
+    except ValueError as e:
+        logging.critical(f"配置文件错误: {e}")
+        return None
+
+    config, warnings = normalize_config(raw_config)
+    config['api_key'] = os.environ.get('DOUYIN_WEATHER_API_KEY', config.get('api_key', '')).strip()
+
+    for warning in warnings:
+        logging.warning(f"配置兼容处理: {warning}")
+
+    errors = validate_runtime_config(config)
+    if errors:
+        logging.critical("配置错误: " + "；".join(errors))
+        return None
+
+    return config
+
+
 def run_bot_task():
     logging.info("🚀 --- 开始执行自动化任务 ---")
-    config_file = 'config.json'
-    if not os.path.exists(config_file):
-        logging.critical("错误：找不到 config.json 配置文件！")
+    config = _load_runtime_config()
+    if not config:
         return
 
-    try:
-        with open(config_file, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        api_host = config.get('api_host')
-        api_key = config.get('api_key') or os.environ.get('DOUYIN_WEATHER_API_KEY')
-        message_template = config.get('message_template', None)
-        friends_list = config.get('friends', [])
-    except Exception as e:
-        logging.critical(f"读取配置文件失败: {e}")
-        return
+    api_host = config['api_host']
+    api_key = config['api_key']
+    message_template = config.get('message_template')
+    friends_list = config['friends']
 
-    if not api_key or not friends_list:
-        logging.critical("配置错误：缺少 API Key 或 好友列表。")
-        return
+    sixin_icon = _control_image_path('douyin_sixin_icon.png')
+    send_button = _control_image_path('douyin_send_button.png')
+    exit_button = _control_image_path('douyin_exit_chat_button.png')
+
+    for required_image in (sixin_icon, send_button, exit_button):
+        if not os.path.exists(required_image):
+            logging.critical(f"缺少控制图像文件: {required_image}")
+            return
 
     logging.info("=" * 50)
     logging.info("⏳ 请在 10 秒内切换到抖音 PC 客户端窗口...")
@@ -153,26 +178,28 @@ def run_bot_task():
     # 遍历处理每个好友
     for friend in friends_list:
         nickname = friend['nickname']
-        # 兼容新旧配置格式
-        city_name = friend.get('city_name', f"ID:{friend.get('city')}")
-        location_id = friend.get('location_id', friend.get('city'))
+        city_name = friend['city_name']
+        location_id = friend['location_id']
         avatar_path = friend.get('avatar_image', '')
 
         logging.info(f"👉 ---=> 正在处理: {nickname} <=---")
 
         # 1. 确保私信列表是打开的 (点击右上角私信图标)
         # 增加 region 限制，防止点错
-        if not find_and_click('control_images/douyin_sixin_icon.png', timeout=5, region=REGION_TOP_BAR):
+        if not find_and_click(sixin_icon, timeout=5, region=REGION_TOP_BAR):
             logging.critical("无法找到“私信”图标，无法进入好友列表，任务停止。")
             break
         time.sleep(2)
 
         # 2. 查找好友 (核心查找逻辑)
         if avatar_path:
-            if not find_friend_with_scrolling(avatar_path):
+            avatar_absolute_path = project_path(*avatar_path.split('/'))
+            if not os.path.exists(avatar_absolute_path):
+                logging.warning(f"⚠️ 跳过：好友 {nickname} 的头像文件不存在: {avatar_path}")
+                continue
+
+            if not find_friend_with_scrolling(avatar_absolute_path):
                 logging.warning(f"⚠️ 跳过：无法在列表中找到好友 {nickname}。")
-                # 为了防止死循环或卡住，找不到好友时我们还是尝试退出一下当前的 potential 状态（虽然理论上没进详情）
-                # 但这里我们选择直接 continue 去找下一个，或者 break
                 continue
         else:
             logging.warning(f"⚠️ 跳过：好友 {nickname} 未配置头像路径。")
@@ -182,19 +209,24 @@ def run_bot_task():
         time.sleep(2)
 
         # 3. 获取天气并发送
-        weather_message = get_weather_data(city_name, nickname, api_key, api_host, location_id, message_template)
+        try:
+            weather_message = get_weather_data(city_name, nickname, api_key, api_host, location_id, message_template)
+        except RequestException as e:
+            logging.error(f"天气接口请求失败（重试后仍失败）: {e}")
+            weather_message = None
+
         if weather_message:
             logging.info("正在粘贴并发送消息...")
             pyperclip.copy(weather_message)
             pyautogui.hotkey('ctrl', 'v')
             time.sleep(1.5)
 
-            if find_and_click('control_images/douyin_send_button.png', region=REGION_CHAT_WINDOW_BOTTOM):
+            if find_and_click(send_button, region=REGION_CHAT_WINDOW_BOTTOM):
                 logging.info(f"✅ 发送成功 -> {nickname}")
                 time.sleep(1)
 
                 # 4. 退出会话 (关键：返回列表以便处理下一个)
-                if not find_and_click('control_images/douyin_exit_chat_button.png', region=REGION_CHAT_WINDOW_TOP):
+                if not find_and_click(exit_button, region=REGION_CHAT_WINDOW_TOP):
                     logging.error("⚠️ 警告：未能点击“退出会话”按钮，可能会影响下一位好友的查找。")
             else:
                 logging.warning("❌ 发送失败：找不到“发送”按钮。")
@@ -215,9 +247,12 @@ def main():
     else:
         logging.info("⏰ 程序已启动，等待每日 08:00 调度执行...")
         schedule.every().day.at("08:00").do(run_bot_task)
-        while True:
-            schedule.run_pending()
-            time.sleep(1)
+        try:
+            while True:
+                schedule.run_pending()
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logging.info("收到 Ctrl+C，程序退出。")
 
 
 if __name__ == "__main__":
