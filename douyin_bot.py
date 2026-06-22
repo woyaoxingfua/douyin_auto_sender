@@ -7,122 +7,157 @@ import schedule
 import argparse
 from logging.handlers import RotatingFileHandler
 from requests.exceptions import RequestException
+from PIL import Image
 
 from weather_service import get_weather_data
 from config_utils import load_config, normalize_config, validate_runtime_config, project_path
 
-# 设置pyautogui的暂停时间和紧急停止功能
 pyautogui.PAUSE = 0.5
 pyautogui.FAILSAFE = True
 
-# --- 配置区域常量 ---
 SCREEN_WIDTH, SCREEN_HEIGHT = pyautogui.size()
 
-# 1. 顶栏区域：用于寻找右上角的“私信”图标
-# 建议：保持原状，除非您发现点击不准
 REGION_TOP_BAR = (int(SCREEN_WIDTH * 0.70), 0, int(SCREEN_WIDTH * 0.15), int(SCREEN_HEIGHT * 0.12))
-
-# 2. 好友列表区域 (屏幕右侧列表)
-# 这是鼠标悬停和查找头像的关键区域
 REGION_FRIEND_LIST = (int(SCREEN_WIDTH * 0.75), int(SCREEN_HEIGHT * 0.10), int(SCREEN_WIDTH * 0.25),
                       int(SCREEN_HEIGHT * 0.85))
-
-# 3. 聊天窗口底部区域 (发送按钮)
 REGION_CHAT_WINDOW_BOTTOM = (int(SCREEN_WIDTH * 0.30), int(SCREEN_HEIGHT * 0.85), int(SCREEN_WIDTH * 0.65),
                              int(SCREEN_HEIGHT * 0.10))
-
-# 4. 聊天窗口顶部区域 (退出会话按钮)
 REGION_CHAT_WINDOW_TOP = (int(SCREEN_WIDTH * 0.70), int(SCREEN_HEIGHT * 0.10), int(SCREEN_WIDTH * 0.25),
                           int(SCREEN_HEIGHT * 0.10))
 
 
+class RecognitionEngine:
+    """识别引擎，支持本地OCR、百度OCR和图像识别三种模式"""
+
+    def __init__(self, ocr_config=None):
+        self.ocr_config = ocr_config or {}
+        self.ocr_client = None
+        self.ocr_mode = "image"
+
+        if self.ocr_config.get("use_local_ocr", True):
+            try:
+                from ocr_service import RapidLocalOCR
+                self.ocr_client = RapidLocalOCR()
+                self.ocr_mode = "local"
+                logging.info("✅ 本地OCR引擎初始化成功 (RapidOCR)")
+                return
+            except Exception as e:
+                logging.warning(f"⚠️ 本地OCR初始化失败: {e}")
+
+        baidu_key = self.ocr_config.get("baidu_api_key", "")
+        baidu_secret = self.ocr_config.get("baidu_secret_key", "")
+        if baidu_key and baidu_secret:
+            try:
+                from ocr_service import BaiduOCR
+                self.ocr_client = BaiduOCR(api_key=baidu_key, secret_key=baidu_secret)
+                self.ocr_mode = "baidu"
+                logging.info("✅ 百度OCR引擎初始化成功")
+                return
+            except Exception as e:
+                logging.warning(f"⚠️ 百度OCR初始化失败: {e}")
+
+        logging.info("📌 OCR未配置，将使用传统图像识别模式")
+
+    def find_and_click_text(self, text: str, region=None, timeout=5) -> bool:
+        if not self.ocr_client:
+            return False
+
+        start_time = time.time()
+        mode_name = "本地OCR" if self.ocr_mode == "local" else "百度OCR"
+        logging.info(f"🔍 {mode_name}模式：在 {('区域 ' + str(region)) if region else '全屏'} 寻找文字 '{text}'...")
+
+        while time.time() - start_time < timeout:
+            try:
+                screenshot = pyautogui.screenshot()
+                result = self.ocr_client.find_text_on_screen(
+                    screenshot, text, region=region, confidence_threshold=0.6
+                )
+                if result:
+                    logging.info(f"✅ OCR找到文字 '{text}' 在 {result}，准备点击。")
+                    pyautogui.click(result)
+                    return True
+            except Exception as e:
+                logging.debug(f"OCR识别异常: {e}")
+            time.sleep(1)
+
+        logging.warning(f"❌ OCR超时！在 {timeout} 秒内未找到文字: '{text}'")
+        return False
+
+    def find_and_click_image(self, image_path: str, confidence=0.8, region=None, timeout=5) -> bool:
+        start_time = time.time()
+        logging.info(f"🖼️ 图像模式：在 {('区域 ' + str(region)) if region else '全屏'} 寻找图像 '{image_path}'...")
+
+        while time.time() - start_time < timeout:
+            try:
+                location = pyautogui.locateCenterOnScreen(image_path, confidence=confidence, region=region)
+                if location:
+                    logging.info(f"✅ 找到图像 '{image_path}' 在 {location}，准备点击。")
+                    pyautogui.click(location)
+                    return True
+            except pyautogui.PyAutoGUIException:
+                pass
+            time.sleep(0.5)
+
+        logging.warning(f"❌ 图像超时！在 {timeout} 秒内未找到图像: '{image_path}'")
+        return False
+
+    def find_and_click(self, target, confidence=0.8, region=None, timeout=5) -> bool:
+        if isinstance(target, str):
+            if target.endswith('.png') or target.endswith('.jpg'):
+                if self.ocr_client:
+                    result = self.find_and_click_image(target, confidence, region, timeout)
+                    if result:
+                        return True
+                    text_from_filename = os.path.splitext(os.path.basename(target))[0]
+                    text_from_filename = text_from_filename.replace('douyin_', '').replace('_', ' ')
+                    logging.info(f"图像识别失败，尝试OCR识别文字: '{text_from_filename}'")
+                    return self.find_and_click_text(text_from_filename, region, timeout)
+                else:
+                    return self.find_and_click_image(target, confidence, region, timeout)
+            else:
+                if self.ocr_client:
+                    return self.find_and_click_text(target, region, timeout)
+                else:
+                    logging.warning(f"未配置OCR，无法识别文字: '{target}'")
+                    return False
+        return False
+
+
 def setup_logging():
-    """配置日志系统"""
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-
-    # 移除旧的处理器，防止重复打印
     if logger.hasHandlers():
         logger.handlers.clear()
-
-    # 文件日志（滚动，防止长期运行导致日志无限膨胀）
     file_handler = RotatingFileHandler(project_path('run.log'), maxBytes=1_000_000, backupCount=3, encoding='utf-8')
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-
-    # 控制台日志
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
 
 
-def find_and_click(image_path, confidence=0.8, timeout=5, region=None):
-    """
-    在屏幕上查找图像并点击
-    """
-    start_time = time.time()
-    logging.info(f"正在 {(('区域 ' + str(region)) if region else '全屏')} 寻找 '{image_path}'...")
-    while time.time() - start_time < timeout:
-        try:
-            # 查找图片中心点
-            location = pyautogui.locateCenterOnScreen(image_path, confidence=confidence, region=region)
-            if location:
-                logging.info(f"✅ 找到 '{image_path}' 在 {location}，准备点击。")
-                pyautogui.click(location)
-                return True
-        except pyautogui.PyAutoGUIException:
-            pass
-        time.sleep(0.5)  # 缩短单次循环间隔，提高响应速度
-    logging.warning(f"❌ 超时！在 {timeout} 秒内未找到图片: '{image_path}'")
-    return False
-
-
 def scroll_friend_list(amount=-200):
-    """
-    在好友列表区域执行纯滚动操作 (无点击)
-    :param amount: 滚动量，负数表示向下滚动。建议设置小一点(-200)以防跳过。
-    """
-    # 计算好友列表区域的中心点
     x, y, width, height = REGION_FRIEND_LIST
     center_x = x + width // 2
     center_y = y + height // 2
-
-    # 1. 将鼠标悬停在列表中心
     pyautogui.moveTo(center_x, center_y)
-
-    # 【关键修改】增加悬停等待时间
-    # 许多UI需要鼠标停留一小会儿才会把滚动焦点切换过去
     time.sleep(0.8)
-
-    # 2. 执行滚动
     pyautogui.scroll(amount)
     logging.info(f"⬇️ 在列表中心悬停并滚动了 {amount} 单位。")
 
 
-def find_friend_with_scrolling(friend_avatar_path, max_scrolls=20):
-    """
-    通过“查找 -> 滚动 -> 查找”的循环来寻找好友
-    """
-    logging.info(f"🔍 开始在列表查找好友头像: {friend_avatar_path}")
+def find_friend_with_scrolling(engine: RecognitionEngine, friend_target, max_scrolls=20):
+    logging.info(f"🔍 开始在列表查找好友: {friend_target}")
 
     for i in range(max_scrolls):
-        # 1. 尝试在当前视野中查找好友
-        # 【关键修改】timeout 增加到 3 秒。
-        # 给程序足够的时间“看清”当前屏幕，防止因为识别慢而错过
-        if find_and_click(friend_avatar_path, confidence=0.75, timeout=3, region=REGION_FRIEND_LIST):
+        if engine.find_and_click(friend_target, confidence=0.75, timeout=3, region=REGION_FRIEND_LIST):
             return True
 
         logging.info(f"📄 第 {i + 1} 页未找到，正在滚动...")
-
-        # 2. 如果没找到，就滚动列表
-        scroll_friend_list(amount=-200)  # 减小幅度，防止滚过头
-
-        # 3. 给时间让界面动画完成并完全静止
-        # 【关键修改】增加到 2 秒，确保列表完全停稳，图像不再模糊
+        scroll_friend_list(amount=-200)
         time.sleep(2)
 
-    logging.error(f"❌ 已滚动 {max_scrolls} 次，仍未找到好友头像: {friend_avatar_path}")
+    logging.error(f"❌ 已滚动 {max_scrolls} 次，仍未找到好友: {friend_target}")
     return False
 
 
@@ -139,6 +174,11 @@ def _load_runtime_config():
 
     config, warnings = normalize_config(raw_config)
     config['api_key'] = os.environ.get('DOUYIN_WEATHER_API_KEY', config.get('api_key', '')).strip()
+
+    if not config.get('ocr_api_key'):
+        config['ocr_api_key'] = os.environ.get('BAIDU_OCR_API_KEY', '').strip()
+    if not config.get('ocr_secret_key'):
+        config['ocr_secret_key'] = os.environ.get('BAIDU_OCR_SECRET_KEY', '').strip()
 
     for warning in warnings:
         logging.warning(f"配置兼容处理: {warning}")
@@ -162,53 +202,69 @@ def run_bot_task():
     message_template = config.get('message_template')
     friends_list = config['friends']
 
-    sixin_icon = _control_image_path('douyin_sixin_icon.png')
-    send_button = _control_image_path('douyin_send_button.png')
-    exit_button = _control_image_path('douyin_exit_chat_button.png')
+    ocr_config = {
+        'use_local_ocr': config.get('use_local_ocr', True),
+        'baidu_api_key': config.get('ocr_api_key', ''),
+        'baidu_secret_key': config.get('ocr_secret_key', ''),
+    }
+    engine = RecognitionEngine(ocr_config)
 
-    for required_image in (sixin_icon, send_button, exit_button):
-        if not os.path.exists(required_image):
-            logging.critical(f"缺少控制图像文件: {required_image}")
-            return
+    if engine.ocr_mode == "local":
+        logging.info("识别模式: 本地OCR (RapidOCR，离线)")
+    elif engine.ocr_mode == "baidu":
+        logging.info("📌 识别模式: 百度OCR (在线)")
+    else:
+        logging.info("📌 识别模式: 传统图像识别")
+        sixin_icon = _control_image_path('douyin_sixin_icon.png')
+        send_button = _control_image_path('douyin_send_button.png')
+        exit_button = _control_image_path('douyin_exit_chat_button.png')
+        for required_image in (sixin_icon, send_button, exit_button):
+            if not os.path.exists(required_image):
+                logging.critical(f"缺少控制图像文件: {required_image}")
+                return
 
     logging.info("=" * 50)
     logging.info("⏳ 请在 10 秒内切换到抖音 PC 客户端窗口...")
     time.sleep(10)
 
-    # 遍历处理每个好友
     for friend in friends_list:
         nickname = friend['nickname']
         city_name = friend['city_name']
         location_id = friend['location_id']
         avatar_path = friend.get('avatar_image', '')
+        avatar_text = friend.get('avatar_text', '')
 
         logging.info(f"👉 ---=> 正在处理: {nickname} <=---")
 
-        # 1. 确保私信列表是打开的 (点击右上角私信图标)
-        # 增加 region 限制，防止点错
-        if not find_and_click(sixin_icon, timeout=5, region=REGION_TOP_BAR):
-            logging.critical("无法找到“私信”图标，无法进入好友列表，任务停止。")
-            break
+        if engine.ocr_client:
+            if not engine.find_and_click_text("私信", timeout=5, region=REGION_TOP_BAR):
+                logging.critical('无法找到"私信"文字，无法进入好友列表，任务停止。')
+                break
+        else:
+            sixin_icon = _control_image_path('douyin_sixin_icon.png')
+            if not engine.find_and_click_image(sixin_icon, timeout=5, region=REGION_TOP_BAR):
+                logging.critical('无法找到"私信"图标，无法进入好友列表，任务停止。')
+                break
         time.sleep(2)
 
-        # 2. 查找好友 (核心查找逻辑)
-        if avatar_path:
+        if avatar_text:
+            if not find_friend_with_scrolling(engine, avatar_text):
+                logging.warning(f"⚠️ 跳过：无法在列表中找到好友 {nickname}。")
+                continue
+        elif avatar_path:
             avatar_absolute_path = project_path(*avatar_path.split('/'))
             if not os.path.exists(avatar_absolute_path):
                 logging.warning(f"⚠️ 跳过：好友 {nickname} 的头像文件不存在: {avatar_path}")
                 continue
-
-            if not find_friend_with_scrolling(avatar_absolute_path):
+            if not find_friend_with_scrolling(engine, avatar_absolute_path):
                 logging.warning(f"⚠️ 跳过：无法在列表中找到好友 {nickname}。")
                 continue
         else:
-            logging.warning(f"⚠️ 跳过：好友 {nickname} 未配置头像路径。")
+            logging.warning(f"⚠️ 跳过：好友 {nickname} 未配置头像路径或文字。")
             continue
 
-        # 找到好友并点击后，稍微等待进入聊天界面
         time.sleep(2)
 
-        # 3. 获取天气并发送
         try:
             weather_message = get_weather_data(city_name, nickname, api_key, api_host, location_id, message_template)
         except RequestException as e:
@@ -221,17 +277,28 @@ def run_bot_task():
             pyautogui.hotkey('ctrl', 'v')
             time.sleep(1.5)
 
-            if find_and_click(send_button, region=REGION_CHAT_WINDOW_BOTTOM):
+            if engine.ocr_client:
+                send_success = engine.find_and_click_text("发送", region=REGION_CHAT_WINDOW_BOTTOM)
+            else:
+                send_button = _control_image_path('douyin_send_button.png')
+                send_success = engine.find_and_click_image(send_button, region=REGION_CHAT_WINDOW_BOTTOM)
+
+            if send_success:
                 logging.info(f"✅ 发送成功 -> {nickname}")
                 time.sleep(1)
 
-                # 4. 退出会话 (关键：返回列表以便处理下一个)
-                if not find_and_click(exit_button, region=REGION_CHAT_WINDOW_TOP):
-                    logging.error("⚠️ 警告：未能点击“退出会话”按钮，可能会影响下一位好友的查找。")
-            else:
-                logging.warning("❌ 发送失败：找不到“发送”按钮。")
+                if engine.ocr_client:
+                    exit_success = engine.find_and_click_text("退出会话", region=REGION_CHAT_WINDOW_TOP)
+                else:
+                    exit_button = _control_image_path('douyin_exit_chat_button.png')
+                    exit_success = engine.find_and_click_image(exit_button, region=REGION_CHAT_WINDOW_TOP)
 
-        time.sleep(3)  # 缓冲时间，准备下一位
+                if not exit_success:
+                    logging.error('⚠️ 警告：未能点击"退出会话"按钮，可能会影响下一位好友的查找。')
+            else:
+                logging.warning('❌ 发送失败：找不到"发送"按钮。')
+
+        time.sleep(3)
 
     logging.info("🎉 所有任务执行完毕。")
 

@@ -6,3 +6,7 @@ tenacity
 opencv-python
 pillow
 pytest
+numpy
+
+# 本地OCR识别（推荐，基于PaddleOCR的轻量级封装）
+rapidocr_onnxruntime
