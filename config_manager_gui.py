@@ -15,26 +15,22 @@ from config_utils import (
 
 CONFIG_FILE = CONFIG_PATH
 DEFAULT_AVATAR_DIR = project_path('friend_avatars')
-# 确保必要的目录存在
 os.makedirs(DEFAULT_AVATAR_DIR, exist_ok=True)
 os.makedirs(project_path('control_images'), exist_ok=True)
 
 
 class ConfigManager(tk.Tk):
-    """
-    抖音好友配置管理GUI应用程序
-    提供图形界面用于配置API信息和好友列表
-    """
     def __init__(self):
         super().__init__()
-        self.title("抖音好友配置后台 v4.1 (全功能版)")
-        self.geometry("800x600")
+        self.title("抖音好友配置后台 v5.0 (OCR增强版)")
+        self.geometry("900x700")
 
-        # 存储好友数据和API配置
         self.friends_data: List[Dict[str, str]] = []
         self.api_key = tk.StringVar()
         self.api_host = tk.StringVar()
-        self.message_template = tk.StringVar() # 新增：消息模板
+        self.message_template = tk.StringVar()
+        self.ocr_api_key = tk.StringVar()
+        self.ocr_secret_key = tk.StringVar()
         self.selected_city_info: Optional[Dict[str, str]] = None
         self.city_lookup_results: List[Dict[str, str]] = []
 
@@ -42,13 +38,9 @@ class ConfigManager(tk.Tk):
         self.load_config()
 
     def create_widgets(self):
-        """
-        创建GUI界面组件
-        """
         main_frame = ttk.Frame(self, padding="10")
         main_frame.pack(expand=True, fill="both")
 
-        # 左侧框架：显示已配置的好友列表
         left_frame = ttk.Frame(main_frame)
         left_frame.pack(side="left", fill="both", expand=True, padx=(0, 10))
         ttk.Label(left_frame, text="已配置好友列表", font=("Helvetica", 12, "bold")).pack(fill="x", pady=5)
@@ -56,32 +48,69 @@ class ConfigManager(tk.Tk):
         self.friends_listbox.pack(expand=True, fill="both")
         self.friends_listbox.bind('<<ListboxSelect>>', self.on_friend_select)
 
-        # 右侧框架：配置区域
         right_frame = ttk.Frame(main_frame)
         right_frame.pack(side="right", fill="both", expand=True)
 
-        # API配置区域
-        api_frame = ttk.LabelFrame(right_frame, text="1. 天气API配置", padding="10")
+        notebook = ttk.Notebook(right_frame)
+        notebook.pack(fill="both", expand=True)
+
+        weather_tab = ttk.Frame(notebook, padding="10")
+        notebook.add(weather_tab, text="天气API")
+
+        ocr_tab = ttk.Frame(notebook, padding="10")
+        notebook.add(ocr_tab, text="OCR配置")
+
+        friend_tab = ttk.Frame(notebook, padding="10")
+        notebook.add(friend_tab, text="好友管理")
+
+        api_frame = ttk.LabelFrame(weather_tab, text="天气API配置", padding="10")
         api_frame.pack(fill="x")
         ttk.Label(api_frame, text="API Host:").grid(row=0, column=0, sticky="w", pady=5)
         ttk.Entry(api_frame, textvariable=self.api_host, width=30).grid(row=0, column=1, sticky="ew")
         ttk.Label(api_frame, text="API Key:").grid(row=1, column=0, sticky="w", pady=5)
         ttk.Entry(api_frame, textvariable=self.api_key, width=30).grid(row=1, column=1, sticky="ew")
-        ttk.Button(api_frame, text="测试连接", command=self.test_api_connectivity).grid(row=1, column=2, sticky="e", padx=(5,0)) # 新增测试连接按钮
+        ttk.Button(api_frame, text="测试连接", command=self.test_api_connectivity).grid(row=1, column=2, sticky="e", padx=(5,0))
         api_frame.grid_columnconfigure(1, weight=1)
 
-        # 消息模板配置区域
-        template_frame = ttk.LabelFrame(right_frame, text="2. 消息模板配置", padding="10")
+        template_frame = ttk.LabelFrame(weather_tab, text="消息模板配置", padding="10")
         template_frame.pack(fill="x", pady=10)
         ttk.Label(template_frame, text="天气播报模板:").pack(anchor="w")
         self.message_template_text = tk.Text(template_frame, height=5, width=40)
         self.message_template_text.pack(fill="x", expand=True, pady=5)
         ttk.Label(template_frame, text="可用变量: {nickname}, {city_name}, {text_day}, {text_night}, {temp_max}, {temp_min}, {wind_dir}, {wind_scale}").pack(anchor="w", pady=2)
-        template_frame.grid_columnconfigure(0, weight=1) # 使Text区域可以扩展
+        template_frame.grid_columnconfigure(0, weight=1)
 
-        # 城市ID查询区域
-        city_frame = ttk.LabelFrame(right_frame, text="3. 查找城市ID", padding="10")
-        city_frame.pack(fill="x", pady=10)
+        paddle_frame = ttk.LabelFrame(ocr_tab, text="本地OCR识别 (推荐)", padding="10")
+        paddle_frame.pack(fill="x")
+        
+        ttk.Checkbutton(paddle_frame, text="启用本地OCR识别（离线，无需API）", variable=self.use_local_ocr).grid(row=0, column=0, columnspan=2, sticky="w", pady=5)
+        
+        paddle_info = ttk.Label(paddle_frame, text=(
+            "基于PaddleOCR的轻量级本地OCR引擎，无需网络即可使用。\n"
+            "首次运行会自动下载模型（约10MB），之后完全离线工作。\n"
+            "支持文字检测和边界提取，定位更精准。"
+        ), wraplength=400, justify="left", foreground="green")
+        paddle_info.grid(row=1, column=0, columnspan=2, sticky="w", pady=5)
+        
+        ttk.Separator(ocr_tab, orient="horizontal").pack(fill="x", pady=10)
+        
+        baidu_frame = ttk.LabelFrame(ocr_tab, text="百度OCR配置 (备选)", padding="10")
+        baidu_frame.pack(fill="x")
+        ttk.Label(baidu_frame, text="OCR API Key:").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Entry(baidu_frame, textvariable=self.ocr_api_key, width=30).grid(row=0, column=1, sticky="ew")
+        ttk.Label(baidu_frame, text="OCR Secret Key:").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Entry(baidu_frame, textvariable=self.ocr_secret_key, width=30, show="*").grid(row=1, column=1, sticky="ew")
+        ttk.Button(baidu_frame, text="测试连接", command=self.test_ocr_connectivity).grid(row=1, column=2, sticky="e", padx=(5,0))
+        baidu_frame.grid_columnconfigure(1, weight=1)
+        
+        baidu_info = ttk.Label(baidu_frame, text=(
+            "当PaddleOCR不可用时，自动切换到百度OCR。\n"
+            "访问 https://ai.baidu.com/tech/ocr 获取API Key（每月2000次免费）。"
+        ), wraplength=400, justify="left", foreground="gray")
+        baidu_info.grid(row=2, column=0, columnspan=3, sticky="w", pady=5)
+
+        city_frame = ttk.LabelFrame(friend_tab, text="查找城市ID", padding="10")
+        city_frame.pack(fill="x")
         ttk.Label(city_frame, text="输入城市名:").grid(row=0, column=0, padx=5)
         self.city_search_entry = ttk.Entry(city_frame, width=15)
         self.city_search_entry.grid(row=0, column=1, padx=5)
@@ -89,8 +118,7 @@ class ConfigManager(tk.Tk):
         self.city_results_listbox = tk.Listbox(city_frame, height=4)
         self.city_results_listbox.grid(row=1, column=0, columnspan=3, sticky="ew", pady=5)
 
-        # 好友信息编辑区域
-        info_frame = ttk.LabelFrame(right_frame, text="4. 编辑好友信息", padding="10")
+        info_frame = ttk.LabelFrame(friend_tab, text="编辑好友信息", padding="10")
         info_frame.pack(fill="both", expand=True, pady=10)
         ttk.Label(info_frame, text="好友昵称:").grid(row=0, column=0, sticky="w", pady=5)
         self.nickname_entry = ttk.Entry(info_frame)
@@ -98,28 +126,49 @@ class ConfigManager(tk.Tk):
         ttk.Label(info_frame, text="城市信息:").grid(row=1, column=0, sticky="w", pady=5)
         self.selected_city_label = ttk.Label(info_frame, text="(请先从上方查询并选择)", relief="sunken")
         self.selected_city_label.grid(row=1, column=1, sticky="ew", columnspan=2)
-        # 头像关联功能
-        ttk.Label(info_frame, text="头像截图:").grid(row=2, column=0, sticky="w", pady=5)
+
+        ttk.Label(info_frame, text="识别方式:").grid(row=2, column=0, sticky="w", pady=5)
+        self.recognition_mode = tk.StringVar(value="image")
+        mode_frame = ttk.Frame(info_frame)
+        mode_frame.grid(row=2, column=1, sticky="ew", columnspan=2)
+        ttk.Radiobutton(mode_frame, text="图像识别", variable=self.recognition_mode, value="image", command=self._on_mode_change).pack(side="left", padx=5)
+        ttk.Radiobutton(mode_frame, text="OCR文字识别", variable=self.recognition_mode, value="text", command=self._on_mode_change).pack(side="left", padx=5)
+
+        ttk.Label(info_frame, text="头像截图:").grid(row=3, column=0, sticky="w", pady=5)
         self.avatar_path_label = ttk.Label(info_frame, text="未选择", relief="sunken")
-        self.avatar_path_label.grid(row=2, column=1, sticky="ew")
-        ttk.Button(info_frame, text="选择...", command=self.select_avatar).grid(row=2, column=2, sticky="e", padx=(5,0))
+        self.avatar_path_label.grid(row=3, column=1, sticky="ew")
+        self.avatar_select_btn = ttk.Button(info_frame, text="选择...", command=self.select_avatar)
+        self.avatar_select_btn.grid(row=3, column=2, sticky="e", padx=(5,0))
+
+        ttk.Label(info_frame, text="OCR文字:").grid(row=4, column=0, sticky="w", pady=5)
+        self.avatar_text_entry = ttk.Entry(info_frame, width=30)
+        self.avatar_text_entry.grid(row=4, column=1, sticky="ew", columnspan=2)
+        ttk.Label(info_frame, text="(OCR模式下，在好友列表中识别的文字，如好友昵称)", foreground="gray").grid(row=5, column=1, sticky="w", columnspan=2)
+
         info_frame.grid_columnconfigure(1, weight=1)
-        
-        # 操作按钮区域
+
         action_button_frame = ttk.Frame(info_frame)
-        action_button_frame.grid(row=3, column=0, columnspan=3, pady=10)
+        action_button_frame.grid(row=6, column=0, columnspan=3, pady=10)
         ttk.Button(action_button_frame, text="添加为新好友", command=self.add_friend).pack(side="left", padx=10, expand=True)
         ttk.Button(action_button_frame, text="更新选中好友", command=self.update_friend).pack(side="left", padx=10, expand=True)
 
-        ttk.Button(right_frame, text="删除选中好友", command=self.delete_friend).pack(side="bottom", fill="x", pady=5)
-        ttk.Button(right_frame, text="️ 保存所有配置并退出", command=self.save_and_quit, style="Accent.TButton").pack(side="bottom", fill="x", ipady=5)
+        bottom_frame = ttk.Frame(right_frame)
+        bottom_frame.pack(side="bottom", fill="x", pady=5)
+        ttk.Button(bottom_frame, text="删除选中好友", command=self.delete_friend).pack(side="left", fill="x", expand=True, padx=(0, 5))
+        ttk.Button(bottom_frame, text="️ 保存所有配置并退出", command=self.save_and_quit, style="Accent.TButton").pack(side="right", fill="x", expand=True, ipady=5)
         self.style = ttk.Style(self)
         self.style.configure("Accent.TButton", foreground="white", background="dodgerblue")
 
+    def _on_mode_change(self):
+        mode = self.recognition_mode.get()
+        if mode == "image":
+            self.avatar_select_btn.config(state="normal")
+            self.avatar_text_entry.config(state="disabled")
+        else:
+            self.avatar_select_btn.config(state="disabled")
+            self.avatar_text_entry.config(state="normal")
+
     def test_api_connectivity(self):
-        """
-        测试和风天气API的连接性
-        """
         api_host = self.api_host.get()
         api_key = self.api_key.get()
 
@@ -129,11 +178,10 @@ class ConfigManager(tk.Tk):
 
         messagebox.showinfo("测试连接", "正在尝试连接和风天气API，请稍候...")
         try:
-            # 使用一个已知城市（如北京的Location ID）进行测试查询
-            test_location_id = "101010100"  # 北京的Location ID
+            test_location_id = "101010100"
             test_url = f"https://{api_host}/v7/weather/now?location={test_location_id}&key={api_key}"
             response = requests.get(test_url, timeout=5)
-            response.raise_for_status()  # 如果请求失败（非2xx状态码），则抛出HTTPError
+            response.raise_for_status()
 
             data = response.json()
             if data.get("code") == "200":
@@ -145,12 +193,36 @@ class ConfigManager(tk.Tk):
         except requests.exceptions.RequestException as e:
             messagebox.showerror("测试失败", f"连接和风天气API时发生错误: {e}\n请检查API Host是否正确，以及网络连接。")
 
+    def test_ocr_connectivity(self):
+        api_key = self.ocr_api_key.get()
+        secret_key = self.ocr_secret_key.get()
+
+        if not (api_key and secret_key):
+            messagebox.showwarning("信息不完整", "请先填写OCR API Key和Secret Key！")
+            return
+
+        messagebox.showinfo("测试连接", "正在尝试连接百度OCR API，请稍候...")
+        try:
+            token_url = "https://aip.baidubce.com/oauth/2.0/token"
+            params = {
+                "grant_type": "client_credentials",
+                "client_id": api_key,
+                "client_secret": secret_key,
+            }
+            response = requests.post(token_url, params=params, timeout=5)
+            response.raise_for_status()
+
+            data = response.json()
+            if "access_token" in data:
+                messagebox.showinfo("测试成功", "百度OCR API连接成功！")
+            else:
+                messagebox.showerror("测试失败", f"获取Token失败: {data.get('error_description', 'unknown')}")
+        except requests.exceptions.Timeout:
+            messagebox.showerror("测试失败", "连接超时，请检查网络连接。")
+        except requests.exceptions.RequestException as e:
+            messagebox.showerror("测试失败", f"连接百度OCR API时发生错误: {e}")
 
     def search_city_id(self):
-        """
-        查询城市ID功能
-        使用和风天气API根据城市名称查询城市信息
-        """
         city_name = self.city_search_entry.get()
         api_host = self.api_host.get()
         api_key = self.api_key.get()
@@ -162,7 +234,6 @@ class ConfigManager(tk.Tk):
         self.selected_city_info = None
 
         try:
-            # 根据API文档修改请求URL和参数
             geo_url = f"https://{api_host}/geo/v2/city/lookup"
             params = {
                 'location': city_name,
@@ -185,9 +256,6 @@ class ConfigManager(tk.Tk):
             messagebox.showerror("网络错误", f"查询城市ID时出错: {e}")
 
     def on_city_result_select(self):
-        """
-        当在城市查询结果中选择一个城市时触发
-        """
         index = self._selected_index(self.city_results_listbox)
         if index is None:
             return
@@ -195,10 +263,6 @@ class ConfigManager(tk.Tk):
         self.selected_city_label.config(text=f"{self.selected_city_info['name']} (ID: {self.selected_city_info['id']})")
 
     def on_friend_select(self, event):
-        """
-        当在好友列表中选择一个好友时触发
-        将选中的好友信息加载到编辑区域
-        """
         index = self._selected_index(self.friends_listbox)
         if index is None:
             return
@@ -206,14 +270,18 @@ class ConfigManager(tk.Tk):
         self.clear_entries()
         self.nickname_entry.insert(0, friend['nickname'])
         self.selected_city_label.config(text=f"{friend['city_name']} (ID: {friend['location_id']})")
-        self.avatar_path_label.config(text=friend.get('avatar_image', '未选择'))
-        # 为了能更新，需要把城市信息也加载回来
+
+        if friend.get('avatar_text'):
+            self.recognition_mode.set("text")
+            self.avatar_text_entry.insert(0, friend['avatar_text'])
+        elif friend.get('avatar_image'):
+            self.recognition_mode.set("image")
+            self.avatar_path_label.config(text=friend['avatar_image'])
+
+        self._on_mode_change()
         self.selected_city_info = {"name": friend['city_name'], "id": friend['location_id']}
 
     def select_avatar(self):
-        """
-        选择好友头像文件
-        """
         filepath = filedialog.askopenfilename(
             title="选择好友头像截图", initialdir=DEFAULT_AVATAR_DIR,
             filetypes=(("PNG files", "*.png"), ("All files", "*.*"))
@@ -229,66 +297,65 @@ class ConfigManager(tk.Tk):
             self.avatar_path_label.config(text=relative_path)
     
     def _get_info_from_form(self):
-        """
-        从表单中获取信息并验证
-        
-        :return: 昵称、头像路径和城市信息的元组，如果验证失败则返回(None, None, None)
-        """
         nickname = self.nickname_entry.get()
         avatar = self.avatar_path_label.cget("text")
+        avatar_text = self.avatar_text_entry.get()
         city_info = self.selected_city_info
+        mode = self.recognition_mode.get()
         
-        if not (nickname and city_info and avatar != '未选择'):
-            messagebox.showwarning("信息不完整", "请确保已填写昵称，并已查询和选择城市，以及关联了头像截图！")
-            return None, None, None
+        if not nickname or not city_info:
+            messagebox.showwarning("信息不完整", "请确保已填写昵称，并已查询和选择城市！")
+            return None, None, None, None
         
-        return nickname, avatar, city_info
+        if mode == "image" and avatar == '未选择':
+            messagebox.showwarning("信息不完整", "图像识别模式下，请选择好友头像截图！")
+            return None, None, None, None
+        
+        if mode == "text" and not avatar_text.strip():
+            messagebox.showwarning("信息不完整", "OCR文字识别模式下，请输入好友在列表中显示的文字！")
+            return None, None, None, None
+        
+        return nickname, avatar, city_info, avatar_text
 
     def add_friend(self):
-        """
-        添加新好友到配置列表
-        """
-        nickname, avatar, city_info = self._get_info_from_form()
+        nickname, avatar, city_info, avatar_text = self._get_info_from_form()
         if not nickname: return
         
         if any(friend.get('nickname') == nickname for friend in self.friends_data):
-            messagebox.showwarning("重复昵称", f"已存在昵称为 '{nickname}' 的好友，请使用“更新选中好友”或改名后再添加。")
+            messagebox.showwarning("重复昵称", f"已存在昵称为 '{nickname}' 的好友，请使用\u201c更新选中好友\u201d或改名后再添加。")
             return
 
         new_friend = {
             "nickname": nickname,
             "city_name": city_info['name'],
             "location_id": city_info['id'],
-            "avatar_image": avatar
+            "avatar_image": avatar if self.recognition_mode.get() == "image" else "",
+            "avatar_text": avatar_text if self.recognition_mode.get() == "text" else ""
         }
         self.friends_data.append(new_friend)
         self.refresh_friends_listbox()
         self.clear_entries()
 
     def update_friend(self):
-        """
-        更新选中的好友信息
-        """
         index = self._selected_index(self.friends_listbox)
         if index is None:
             messagebox.showwarning("未选择", "请先在左侧列表选择一个要更新的好友！")
             return
         
-        nickname, avatar, city_info = self._get_info_from_form()
+        nickname, avatar, city_info, avatar_text = self._get_info_from_form()
         if not nickname: return
 
         self.friends_data[index] = {
             "nickname": nickname, "city_name": city_info['name'],
-            "location_id": city_info['id'], "avatar_image": avatar
+            "location_id": city_info['id'],
+            "avatar_image": avatar if self.recognition_mode.get() == "image" else "",
+            "avatar_text": avatar_text if self.recognition_mode.get() == "text" else ""
         }
         self.refresh_friends_listbox()
         self.friends_listbox.selection_set(index)
         messagebox.showinfo("成功", "好友信息已更新！")
 
     def delete_friend(self):
-        """
-        删除选中的好友
-        """
         index = self._selected_index(self.friends_listbox)
         if index is None:
             messagebox.showwarning("未选择", "请先在左侧列表选择一个要删除的好友！")
@@ -299,30 +366,21 @@ class ConfigManager(tk.Tk):
             self.clear_entries()
 
     def refresh_friends_listbox(self):
-        """
-        刷新好友列表显示
-        根据配置文件格式兼容性要求，支持新旧两种格式显示
-        """
         self.friends_listbox.delete(0, tk.END)
         for friend in self.friends_data:
-            # 兼容不同版本的配置文件格式
-            if 'city_name' in friend and 'location_id' in friend:
-                # 新格式 (V4.1)
-                display_text = f"{friend['nickname']} -> {friend['city_name']} (头像: {os.path.basename(friend.get('avatar_image', '无'))})"
-            elif 'city' in friend:
-                # 旧格式 (V4.0及以前)
-                city_info = friend['city']
-                avatar_info = os.path.basename(friend.get('avatar_image', '无')) if friend.get('avatar_image') else '无'
-                display_text = f"{friend['nickname']} -> 城市ID: {city_info} (头像: {avatar_info})"
+            nickname = friend['nickname']
+            city_name = friend.get('city_name', '未知')
+            
+            if friend.get('avatar_text'):
+                display_text = f"{nickname} -> {city_name} [OCR: {friend['avatar_text']}]"
+            elif friend.get('avatar_image'):
+                display_text = f"{nickname} -> {city_name} [头像: {os.path.basename(friend['avatar_image'])}]"
             else:
-                # 未知格式
-                display_text = f"{friend['nickname']} -> 格式未知"
+                display_text = f"{nickname} -> {city_name} [未配置识别方式]"
+            
             self.friends_listbox.insert(tk.END, display_text)
             
     def load_config(self):
-        """
-        加载配置文件
-        """
         try:
             raw_config = load_config(CONFIG_FILE)
         except ValueError as e:
@@ -336,19 +394,18 @@ class ConfigManager(tk.Tk):
         self.api_host.set(config.get('api_host', ''))
         self.api_key.set(config.get('api_key', ''))
         self.message_template.set(config.get('message_template', ''))
+        self.use_local_ocr.set(config.get('use_local_ocr', True))
+        self.ocr_api_key.set(config.get('ocr_api_key', ''))
+        self.ocr_secret_key.set(config.get('ocr_secret_key', ''))
         self.friends_data = cast(List[Dict[str, str]], config.get('friends', []))
         self.refresh_friends_listbox()
 
-        # 如果配置文件不存在或模板为空，设置默认模板
         if not self.message_template.get():
             self.message_template.set(DEFAULT_MESSAGE_TEMPLATE)
-        self.message_template_text.delete(1.0, tk.END) # 清空旧内容
-        self.message_template_text.insert(tk.END, self.message_template.get()) # 插入加载或默认模板
+        self.message_template_text.delete(1.0, tk.END)
+        self.message_template_text.insert(tk.END, self.message_template.get())
 
     def save_and_quit(self):
-        """
-        保存配置并退出程序
-        """
         api_host = self.api_host.get().strip()
         if not api_host:
             messagebox.showwarning("信息不完整", "请先填写 API Host。")
@@ -361,7 +418,10 @@ class ConfigManager(tk.Tk):
         config_data = {
             'api_host': api_host,
             'api_key': self.api_key.get().strip(),
-            'message_template': self.message_template_text.get(1.0, tk.END).strip(), # 新增：保存消息模板
+            'message_template': self.message_template_text.get(1.0, tk.END).strip(),
+            'use_local_ocr': self.use_local_ocr.get(),
+            'ocr_api_key': self.ocr_api_key.get().strip(),
+            'ocr_secret_key': self.ocr_secret_key.get().strip(),
             'friends': self.friends_data
         }
 
@@ -375,12 +435,12 @@ class ConfigManager(tk.Tk):
         self.destroy()
 
     def clear_entries(self):
-        """
-        清空表单输入框
-        """
         self.nickname_entry.delete(0, tk.END)
         self.selected_city_label.config(text="(请先从上方查询并选择)")
         self.avatar_path_label.config(text="未选择")
+        self.avatar_text_entry.delete(0, tk.END)
+        self.recognition_mode.set("image")
+        self._on_mode_change()
         self.selected_city_info = None
 
     def _selected_index(self, listbox: tk.Listbox) -> Optional[int]:

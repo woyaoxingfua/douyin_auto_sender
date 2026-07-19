@@ -56,6 +56,9 @@ def normalize_config(raw_config: Dict) -> Tuple[Dict, List[str]]:
         "api_host": _strip_host(raw_config.get("api_host", "")),
         "api_key": (raw_config.get("api_key", "") or "").strip(),
         "message_template": (raw_config.get("message_template", "") or DEFAULT_MESSAGE_TEMPLATE).strip(),
+        "use_local_ocr": raw_config.get("use_local_ocr", True),
+        "ocr_api_key": (raw_config.get("ocr_api_key", "") or "").strip(),
+        "ocr_secret_key": (raw_config.get("ocr_secret_key", "") or "").strip(),
         "friends": friends,
     }
     return normalized_config, warnings
@@ -66,6 +69,7 @@ def normalize_friend(raw_friend: Dict) -> Dict:
     location_id = str(raw_friend.get("location_id") or raw_friend.get("city") or "").strip()
     city_name = str(raw_friend.get("city_name", "")).strip()
     avatar_image = str(raw_friend.get("avatar_image", "")).strip().replace("\\", "/")
+    avatar_text = str(raw_friend.get("avatar_text", "")).strip()
 
     if not nickname:
         raise ValueError("nickname 为空，已跳过")
@@ -80,6 +84,7 @@ def normalize_friend(raw_friend: Dict) -> Dict:
         "city_name": city_name,
         "location_id": location_id,
         "avatar_image": avatar_image,
+        "avatar_text": avatar_text,
     }
 
 
@@ -91,5 +96,14 @@ def validate_runtime_config(config: Dict) -> List[str]:
         errors.append("缺少 api_key（可在 config.json 或环境变量 DOUYIN_WEATHER_API_KEY 提供）")
     if not config.get("friends"):
         errors.append("好友列表为空")
+    
+    has_any_recognition = False
+    for friend in config.get("friends", []):
+        if friend.get("avatar_image") or friend.get("avatar_text"):
+            has_any_recognition = True
+            break
+    
+    if config.get("friends") and not has_any_recognition:
+        errors.append("所有好友都未配置识别方式（头像截图或OCR文字）")
+    
     return errors
-
