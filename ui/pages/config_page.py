@@ -65,7 +65,7 @@ class ConfigPage(QWidget):
         left_layout.addWidget(left_title)
 
         self.friends_listbox = QListWidget()
-        self.friends_listbox.setMinimumWidth(260)
+        self.friends_listbox.setMinimumWidth(320)
         self.friends_listbox.currentRowChanged.connect(self._on_friend_select)
         left_layout.addWidget(self.friends_listbox, 1)
 
@@ -119,8 +119,29 @@ class ConfigPage(QWidget):
         bottom_layout = QHBoxLayout(bottom_bar)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
 
-        tip = QLabel("💡 修改后记得点击保存按钮")
-        tip.setStyleSheet("color: #7f8c8d; font-size: 12px;")
+        self.mode_label = QLabel("当前模式: 图像识别")
+        self.mode_label.setStyleSheet("color: #2c3e50; font-weight: bold; font-size: 13px;")
+        bottom_layout.addWidget(self.mode_label)
+
+        self.mode_switch_btn = QPushButton("🔄 切换到OCR模式")
+        self.mode_switch_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: 1px solid #3498db;
+                border-radius: 5px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        self.mode_switch_btn.clicked.connect(self._switch_mode)
+        bottom_layout.addWidget(self.mode_switch_btn)
+
+        tip = QLabel("💡 修改后记得保存")
+        tip.setStyleSheet("color: #7f8c8d; font-size: 12px; margin-left: 16px;")
         bottom_layout.addWidget(tip)
         bottom_layout.addStretch()
 
@@ -168,6 +189,7 @@ class ConfigPage(QWidget):
         key_label.setFixedWidth(90)
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setPlaceholderText("输入和风天气API Key")
+        self.api_key_edit.setEchoMode(QLineEdit.Password)
         key_row.addWidget(key_label)
         key_row.addWidget(self.api_key_edit, 1)
         test_btn = QPushButton("测试连接")
@@ -232,6 +254,7 @@ class ConfigPage(QWidget):
         baidu_key_label = QLabel("OCR API Key:")
         baidu_key_label.setFixedWidth(110)
         self.ocr_api_key_edit = QLineEdit()
+        self.ocr_api_key_edit.setEchoMode(QLineEdit.Password)
         baidu_key_row.addWidget(baidu_key_label)
         baidu_key_row.addWidget(self.ocr_api_key_edit, 1)
         baidu_layout.addLayout(baidu_key_row)
@@ -342,6 +365,7 @@ class ConfigPage(QWidget):
             }
         """)
         self.avatar_select_btn = QPushButton("选择...")
+        self.avatar_select_btn.setMinimumWidth(70)
         self.avatar_select_btn.clicked.connect(self._select_avatar)
         avatar_row.addWidget(avatar_label)
         avatar_row.addWidget(self.avatar_path_label, 1)
@@ -362,7 +386,7 @@ class ConfigPage(QWidget):
         info_layout.addWidget(text_tip)
 
         action_row = QHBoxLayout()
-        action_row.addStretch()
+        action_row.setSpacing(10)
         add_btn = QPushButton("➕ 添加为新好友")
         add_btn.setStyleSheet("""
             QPushButton {
@@ -370,7 +394,7 @@ class ConfigPage(QWidget):
                 color: white;
                 border: 1px solid #1abc9c;
                 border-radius: 5px;
-                padding: 8px 20px;
+                padding: 8px 16px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -379,9 +403,15 @@ class ConfigPage(QWidget):
         """)
         add_btn.clicked.connect(self._add_friend)
         update_btn = QPushButton("✏️ 更新选中好友")
+        update_btn.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+            }
+        """)
         update_btn.clicked.connect(self._update_friend)
         action_row.addWidget(add_btn)
         action_row.addWidget(update_btn)
+        action_row.addStretch()
         info_layout.addLayout(action_row)
 
         layout.addWidget(info_group)
@@ -664,6 +694,24 @@ class ConfigPage(QWidget):
 
         template = config.get('message_template', '') or DEFAULT_MESSAGE_TEMPLATE
         self.message_template_edit.setPlainText(template)
+
+        self._update_mode_display()
+
+    def _update_mode_display(self):
+        use_ocr = self.use_local_ocr.isChecked()
+        if use_ocr:
+            self.mode_label.setText("当前模式: 本地OCR")
+            self.mode_label.setStyleSheet("color: #27ae60; font-weight: bold; font-size: 13px;")
+            self.mode_switch_btn.setText("🔄 切换到图像模式")
+        else:
+            self.mode_label.setText("当前模式: 图像识别")
+            self.mode_label.setStyleSheet("color: #3498db; font-weight: bold; font-size: 13px;")
+            self.mode_switch_btn.setText("🔄 切换到OCR模式")
+
+    def _switch_mode(self):
+        current = self.use_local_ocr.isChecked()
+        self.use_local_ocr.setChecked(not current)
+        self._update_mode_display()
 
     def _clear_entries(self):
         self.nickname_edit.clear()

@@ -15,6 +15,7 @@ from ui.pages.dashboard_page import DashboardPage
 from ui.pages.config_page import ConfigPage
 from ui.pages.monitor_page import MonitorPage
 from ui.pages.scheduler_page import SchedulerPage
+from ui.pages.ui_config_page import UIConfigPage
 from ui.workers.bot_worker import BotWorker
 from ui.styles import load_stylesheet
 
@@ -55,6 +56,7 @@ class MainWindow(QMainWindow):
         items = [
             ("📊  仪表盘", "dashboard"),
             ("⚙️  配置管理", "config"),
+            ("📱  抖音界面", "ui_config"),
             ("📡  任务监控", "monitor"),
             ("⏰  调度设置", "scheduler"),
         ]
@@ -71,11 +73,13 @@ class MainWindow(QMainWindow):
 
         self.dashboard_page = DashboardPage()
         self.config_page = ConfigPage()
+        self.ui_config_page = UIConfigPage()
         self.monitor_page = MonitorPage()
         self.scheduler_page = SchedulerPage()
 
         self.content_stack.addWidget(self.dashboard_page)
         self.content_stack.addWidget(self.config_page)
+        self.content_stack.addWidget(self.ui_config_page)
         self.content_stack.addWidget(self.monitor_page)
         self.content_stack.addWidget(self.scheduler_page)
 
@@ -203,7 +207,7 @@ class MainWindow(QMainWindow):
         self.worker.failed.connect(self._on_task_failed)
         self.worker.start()
 
-        self.content_stack.setCurrentIndex(2)
+        self.content_stack.setCurrentIndex(3)
         self.run_btn.setEnabled(False)
         self.run_btn.setText("⏳ 运行中...")
 

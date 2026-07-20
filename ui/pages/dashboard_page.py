@@ -99,17 +99,20 @@ class DashboardPage(QWidget):
                 background-color: #ffffff;
                 border-radius: 8px;
                 border: 1px solid #e8ecef;
-                padding: 20px;
+                padding: 16px;
             }
         """)
+        card.setMinimumHeight(100)
         lay = QVBoxLayout(card)
+        lay.setSpacing(4)
 
         val_label = QLabel(value)
-        val_label.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {color};")
+        val_label.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {color};")
         val_label.setAlignment(Qt.AlignCenter)
+        val_label.setWordWrap(True)
 
         lbl_label = QLabel(label)
-        lbl_label.setStyleSheet("font-size: 13px; color: #7f8c8d; margin-top: 4px;")
+        lbl_label.setStyleSheet("font-size: 12px; color: #7f8c8d;")
         lbl_label.setAlignment(Qt.AlignCenter)
 
         lay.addWidget(val_label)

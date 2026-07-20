@@ -17,13 +17,67 @@ pyautogui.FAILSAFE = True
 
 SCREEN_WIDTH, SCREEN_HEIGHT = pyautogui.size()
 
-REGION_TOP_BAR = (int(SCREEN_WIDTH * 0.70), 0, int(SCREEN_WIDTH * 0.15), int(SCREEN_HEIGHT * 0.12))
-REGION_FRIEND_LIST = (int(SCREEN_WIDTH * 0.75), int(SCREEN_HEIGHT * 0.10), int(SCREEN_WIDTH * 0.25),
-                      int(SCREEN_HEIGHT * 0.85))
-REGION_CHAT_WINDOW_BOTTOM = (int(SCREEN_WIDTH * 0.30), int(SCREEN_HEIGHT * 0.85), int(SCREEN_WIDTH * 0.65),
-                             int(SCREEN_HEIGHT * 0.10))
-REGION_CHAT_WINDOW_TOP = (int(SCREEN_WIDTH * 0.70), int(SCREEN_HEIGHT * 0.10), int(SCREEN_WIDTH * 0.25),
-                          int(SCREEN_HEIGHT * 0.10))
+
+def _get_ui_regions():
+    """从配置文件读取UI区域，如无则使用默认值"""
+    default_regions = {
+        "top_bar": {"x_pct": 0.65, "y_pct": 0.0, "w_pct": 0.25, "h_pct": 0.10},
+        "friend_list": {"x_pct": 0.75, "y_pct": 0.10, "w_pct": 0.25, "h_pct": 0.85},
+        "chat_bottom": {"x_pct": 0.30, "y_pct": 0.85, "w_pct": 0.65, "h_pct": 0.10},
+        "chat_top": {"x_pct": 0.70, "y_pct": 0.10, "w_pct": 0.25, "h_pct": 0.10},
+    }
+    try:
+        import json
+        cfg_path = project_path('config.json')
+        if os.path.exists(cfg_path):
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            user_regions = cfg.get('ui_regions', {})
+            for key in default_regions:
+                if key in user_regions:
+                    default_regions[key].update(user_regions[key])
+    except Exception:
+        pass
+
+    regions = {}
+    for key, r in default_regions.items():
+        regions[key] = (
+            int(r["x_pct"] * SCREEN_WIDTH),
+            int(r["y_pct"] * SCREEN_HEIGHT),
+            int(r["w_pct"] * SCREEN_WIDTH),
+            int(r["h_pct"] * SCREEN_HEIGHT),
+        )
+    return regions
+
+
+def _get_ocr_texts():
+    """从配置文件读取OCR识别文字"""
+    default_texts = {
+        "sixin": "消息",
+        "send": "发送",
+        "exit": "退出会话",
+    }
+    try:
+        import json
+        cfg_path = project_path('config.json')
+        if os.path.exists(cfg_path):
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            user_texts = cfg.get('ocr_texts', {})
+            default_texts["sixin"] = user_texts.get("ocr_text_sixin", default_texts["sixin"])
+            default_texts["send"] = user_texts.get("ocr_text_send", default_texts["send"])
+            default_texts["exit"] = user_texts.get("ocr_text_exit", default_texts["exit"])
+    except Exception:
+        pass
+    return default_texts
+
+
+_regions = _get_ui_regions()
+_ocr_texts = _get_ocr_texts()
+REGION_TOP_BAR = _regions["top_bar"]
+REGION_FRIEND_LIST = _regions["friend_list"]
+REGION_CHAT_WINDOW_BOTTOM = _regions["chat_bottom"]
+REGION_CHAT_WINDOW_TOP = _regions["chat_top"]
 
 
 class RecognitionEngine:
@@ -237,8 +291,8 @@ def run_bot_task():
         logging.info(f"👉 ---=> 正在处理: {nickname} <=---")
 
         if engine.ocr_client:
-            if not engine.find_and_click_text("私信", timeout=5, region=REGION_TOP_BAR):
-                logging.critical('无法找到"私信"文字，无法进入好友列表，任务停止。')
+            if not engine.find_and_click_text(_ocr_texts["sixin"], timeout=5, region=REGION_TOP_BAR):
+                logging.critical(f'无法找到"{_ocr_texts["sixin"]}"文字，无法进入好友列表，任务停止。')
                 break
         else:
             sixin_icon = _control_image_path('douyin_sixin_icon.png')
@@ -278,7 +332,7 @@ def run_bot_task():
             time.sleep(1.5)
 
             if engine.ocr_client:
-                send_success = engine.find_and_click_text("发送", region=REGION_CHAT_WINDOW_BOTTOM)
+                send_success = engine.find_and_click_text(_ocr_texts["send"], region=REGION_CHAT_WINDOW_BOTTOM)
             else:
                 send_button = _control_image_path('douyin_send_button.png')
                 send_success = engine.find_and_click_image(send_button, region=REGION_CHAT_WINDOW_BOTTOM)
@@ -288,7 +342,7 @@ def run_bot_task():
                 time.sleep(1)
 
                 if engine.ocr_client:
-                    exit_success = engine.find_and_click_text("退出会话", region=REGION_CHAT_WINDOW_TOP)
+                    exit_success = engine.find_and_click_text(_ocr_texts["exit"], region=REGION_CHAT_WINDOW_TOP)
                 else:
                     exit_button = _control_image_path('douyin_exit_chat_button.png')
                     exit_success = engine.find_and_click_image(exit_button, region=REGION_CHAT_WINDOW_TOP)
