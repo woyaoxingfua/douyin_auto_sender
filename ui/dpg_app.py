@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import shutil
 import threading
 import logging
 import requests
@@ -20,43 +21,53 @@ class DPGApp:
         self.scheduled_time = "08:00"
         self.scheduler_enabled = True
         self._last_run_date = None
+        self._upload_target = None
         self._load_scheduler_config()
 
     def build(self):
         with dpg.theme() as light_theme:
             with dpg.theme_component(dpg.mvAll):
-                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (240, 242, 245))
+                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (248, 249, 250))
                 dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (255, 255, 255))
                 dpg.add_theme_color(dpg.mvThemeCol_PopupBg, (255, 255, 255))
-                dpg.add_theme_color(dpg.mvThemeCol_Text, (51, 51, 51))
-                dpg.add_theme_color(dpg.mvThemeCol_TextDisabled, (160, 160, 160))
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (26, 188, 156))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (22, 160, 133))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (20, 144, 120))
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (73, 80, 87))
+                dpg.add_theme_color(dpg.mvThemeCol_TextDisabled, (173, 181, 189))
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (134, 142, 150))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (173, 181, 189))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (134, 142, 150))
                 dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (255, 255, 255))
-                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, (245, 247, 250))
-                dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, (235, 237, 240))
-                dpg.add_theme_color(dpg.mvThemeCol_Border, (220, 220, 220))
-                dpg.add_theme_color(dpg.mvThemeCol_Tab, (240, 242, 245))
-                dpg.add_theme_color(dpg.mvThemeCol_TabHovered, (26, 188, 156))
-                dpg.add_theme_color(dpg.mvThemeCol_TabActive, (26, 188, 156))
-                dpg.add_theme_color(dpg.mvThemeCol_TabSelected, (26, 188, 156))
-                dpg.add_theme_color(dpg.mvThemeCol_Header, (240, 242, 245))
-                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, (220, 220, 220))
-                dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, (200, 200, 200))
-                dpg.add_theme_color(dpg.mvThemeCol_Separator, (220, 220, 220))
-                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarBg, (240, 242, 245))
-                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrab, (189, 195, 199))
-                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabHovered, (149, 165, 166))
-                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabActive, (127, 140, 141))
-                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 8)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, (233, 236, 239))
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, (220, 223, 227))
+                dpg.add_theme_color(dpg.mvThemeCol_Border, (222, 226, 230))
+                dpg.add_theme_color(dpg.mvThemeCol_Tab, (248, 249, 250))
+                dpg.add_theme_color(dpg.mvThemeCol_TabHovered, (9, 171, 59))
+                dpg.add_theme_color(dpg.mvThemeCol_TabActive, (9, 171, 59))
+                dpg.add_theme_color(dpg.mvThemeCol_TabSelected, (9, 171, 59))
+                dpg.add_theme_color(dpg.mvThemeCol_Header, (233, 236, 239))
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, (222, 226, 230))
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, (209, 213, 218))
+                dpg.add_theme_color(dpg.mvThemeCol_Separator, (222, 226, 230))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarBg, (248, 249, 250))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrab, (173, 181, 189))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabHovered, (134, 142, 150))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabActive, (108, 117, 125))
+                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 6)
                 dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, 6)
                 dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 4)
                 dpg.add_theme_style(dpg.mvStyleVar_TabRounding, 4)
                 dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 16, 16)
-                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 8, 6)
-                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 8, 8)
+                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 8, 4)
+                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 8, 6)
         dpg.bind_theme(light_theme)
+
+        dpg.add_file_dialog(
+            tag="file_dialog",
+            show=False,
+            callback=self._on_file_selected,
+            width=500,
+            height=400,
+            modal=True,
+        )
 
         with dpg.window(tag="main_window"):
             with dpg.tab_bar():
@@ -76,7 +87,7 @@ class DPGApp:
             with dpg.group(horizontal=True):
                 self.status_text = dpg.add_text("就绪")
                 dpg.add_spacer(width=20)
-                self.douyin_status = dpg.add_text("抖音: 检测中...", color=(255, 165, 0))
+                self.douyin_status = dpg.add_text("抖音: 检测中...", color=(255, 193, 7))
                 dpg.add_spacer(width=20)
                 self.process_text = dpg.add_text("内存: --MB  CPU: --%")
 
@@ -87,21 +98,21 @@ class DPGApp:
         with dpg.group(horizontal=True):
             with dpg.child_window(width=220, height=120):
                 dpg.add_text("好友数量")
-                self.friends_count = dpg.add_text("0", color=(26, 188, 156))
+                self.friends_count = dpg.add_text("0", color=(9, 171, 59))
                 dpg.add_text("识别模式")
-                self.ocr_mode_text = dpg.add_text("图像识别", color=(52, 152, 219))
+                self.ocr_mode_text = dpg.add_text("图像识别", color=(13, 110, 253))
 
             with dpg.child_window(width=220, height=120):
                 dpg.add_text("调度状态")
-                self.schedule_status = dpg.add_text("未启用", color=(231, 76, 60))
+                self.schedule_status = dpg.add_text("未启用", color=(220, 53, 69))
                 dpg.add_text("执行时间")
-                self.schedule_time = dpg.add_text("08:00", color=(155, 89, 182))
+                self.schedule_time = dpg.add_text("08:00", color=(123, 44, 191))
 
             with dpg.child_window(width=220, height=120):
                 dpg.add_text("抖音状态")
-                self.douyin_dashboard_status = dpg.add_text("检测中...", color=(255, 165, 0))
+                self.douyin_dashboard_status = dpg.add_text("检测中...", color=(255, 193, 7))
                 dpg.add_text("今日已发送")
-                self.sent_count = dpg.add_text("0", color=(26, 188, 156))
+                self.sent_count = dpg.add_text("0", color=(9, 171, 59))
 
         dpg.add_spacer(height=10)
         with dpg.group(horizontal=True):
@@ -176,7 +187,6 @@ class DPGApp:
     def _build_messages(self):
         with dpg.child_window():
             dpg.add_text("消息预设库")
-            dpg.add_text("管理自定义消息模板")
             with dpg.group(horizontal=True):
                 dpg.add_button(label="新建预设", callback=self._new_preset, width=100)
                 dpg.add_button(label="导入", callback=self._import_presets, width=80)
@@ -205,7 +215,7 @@ class DPGApp:
                     self._build_region_config()
 
     def _build_image_config(self):
-        dpg.add_text("控制图像用于图像匹配模式")
+        dpg.add_text("控制图像用于图像匹配模式，点击上传按钮选择图片文件")
         images = [
             ("douyin_sixin_icon.png", "私信图标"),
             ("douyin_send_button.png", "发送按钮"),
@@ -217,9 +227,45 @@ class DPGApp:
                 dpg.add_text(f"{name}:")
                 path = project_path('control_images', filename)
                 status = "已配置" if os.path.exists(path) else "未配置"
-                color = (46, 204, 113) if os.path.exists(path) else (231, 76, 60)
+                color = (9, 171, 59) if os.path.exists(path) else (220, 53, 69)
                 self.image_widgets[filename] = dpg.add_text(status, color=color)
-                dpg.add_button(label="上传", callback=lambda s, a, u: self._upload_image(u), user_data=filename, width=60)
+                dpg.add_button(
+                    label="选择文件",
+                    callback=self._open_file_dialog,
+                    user_data=filename,
+                    width=80,
+                )
+
+    def _open_file_dialog(self, sender, app_data):
+        self._upload_target = app_data
+        dpg.show_item("file_dialog")
+
+    def _on_file_dialog(self, sender, app_data):
+        self._upload_target = sender
+
+    def _on_file_selected(self, sender, app_data):
+        if not app_data or not self._upload_target:
+            return
+
+        file_path = app_data.get('file_path_name', '')
+        if not file_path or not os.path.exists(file_path):
+            return
+
+        target_dir = project_path('control_images')
+        os.makedirs(target_dir, exist_ok=True)
+        dest = os.path.join(target_dir, self._upload_target)
+
+        try:
+            shutil.copy2(file_path, dest)
+            status = "已配置"
+            color = (9, 171, 59)
+            dpg.set_value(self.image_widgets[self._upload_target], status)
+            dpg.configure_item(self.image_widgets[self._upload_target], color=color)
+            self._show_toast(f"已保存: {self._upload_target}")
+        except Exception as e:
+            self._show_toast(f"保存失败: {e}")
+
+        self._upload_target = None
 
     def _build_ocr_text_config(self):
         dpg.add_text("OCR识别文字配置")
@@ -361,9 +407,6 @@ class DPGApp:
     def _export_presets(self, sender, app_data):
         self._show_toast("导出功能待实现")
 
-    def _upload_image(self, filename):
-        self._show_toast(f"请通过文件选择器上传 {filename}")
-
     def _save_ocr_texts(self, sender, app_data):
         try:
             cfg = load_config() or {}
@@ -417,7 +460,7 @@ class DPGApp:
                 pass
         self.douyin_running = found
         status = "运行中" if found else "未运行"
-        color = (46, 204, 113) if found else (231, 76, 60)
+        color = (9, 171, 59) if found else (220, 53, 69)
         dpg.set_value(self.douyin_dashboard_status, status)
         dpg.configure_item(self.douyin_dashboard_status, color=color)
 
@@ -469,9 +512,9 @@ class DPGApp:
         self._show_toast("日志导出待实现")
 
     def _show_toast(self, message):
-        with dpg.window(label="提示", modal=True, width=300, height=100, pos=[300, 250]):
+        with dpg.window(label="提示", modal=False, width=300, height=100, pos=[400, 300]):
             dpg.add_text(message)
-            dpg.add_button(label="确定", callback=lambda: dpg.delete_item(dpg.last_item().parent))
+            dpg.add_button(label="确定", width=80, callback=lambda: dpg.delete_item(dpg.last_item().parent))
 
     def _start_background_tasks(self):
         def update_stats():
