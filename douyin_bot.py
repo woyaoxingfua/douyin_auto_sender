@@ -11,6 +11,10 @@ from PIL import Image
 
 from weather_service import get_weather_data
 from config_utils import load_config, normalize_config, validate_runtime_config, project_path
+from hybrid_recognizer import HybridRecognizer
+from message_manager import MessageManager
+from send_log import log_send
+from douyin_monitor import is_douyin_running, wait_for_douyin
 
 pyautogui.PAUSE = 0.5
 pyautogui.FAILSAFE = True
@@ -247,35 +251,27 @@ def _load_runtime_config():
 
 def run_bot_task():
     logging.info("🚀 --- 开始执行自动化任务 ---")
+
+    if not is_douyin_running():
+        logging.info("⏳ 等待抖音启动...")
+        if not wait_for_douyin(timeout=30):
+            logging.error("❌ 抖音未启动，任务取消")
+            return
+
     config = _load_runtime_config()
     if not config:
         return
 
     api_host = config['api_host']
     api_key = config['api_key']
-    message_template = config.get('message_template')
     friends_list = config['friends']
 
-    ocr_config = {
-        'use_local_ocr': config.get('use_local_ocr', True),
-        'baidu_api_key': config.get('ocr_api_key', ''),
-        'baidu_secret_key': config.get('ocr_secret_key', ''),
-    }
-    engine = RecognitionEngine(ocr_config)
+    recognizer = HybridRecognizer()
+    msg_manager = MessageManager()
+    active_preset = msg_manager.get_active_preset()
 
-    if engine.ocr_mode == "local":
-        logging.info("识别模式: 本地OCR (RapidOCR，离线)")
-    elif engine.ocr_mode == "baidu":
-        logging.info("📌 识别模式: 百度OCR (在线)")
-    else:
-        logging.info("📌 识别模式: 传统图像识别")
-        sixin_icon = _control_image_path('douyin_sixin_icon.png')
-        send_button = _control_image_path('douyin_send_button.png')
-        exit_button = _control_image_path('douyin_exit_chat_button.png')
-        for required_image in (sixin_icon, send_button, exit_button):
-            if not os.path.exists(required_image):
-                logging.critical(f"缺少控制图像文件: {required_image}")
-                return
+    logging.info(f"识别模式: {'OCR+图像混合' if recognizer.ocr_client else '图像识别'}")
+    logging.info(f"消息预设: {active_preset.get('name', '未知') if active_preset else '无'}")
 
     logging.info("=" * 50)
     logging.info("⏳ 请在 10 秒内切换到抖音 PC 客户端窗口...")
@@ -290,19 +286,14 @@ def run_bot_task():
 
         logging.info(f"👉 ---=> 正在处理: {nickname} <=---")
 
-        if engine.ocr_client:
-            if not engine.find_and_click_text(_ocr_texts["sixin"], timeout=5, region=REGION_TOP_BAR):
-                logging.critical(f'无法找到"{_ocr_texts["sixin"]}"文字，无法进入好友列表，任务停止。')
-                break
-        else:
-            sixin_icon = _control_image_path('douyin_sixin_icon.png')
-            if not engine.find_and_click_image(sixin_icon, timeout=5, region=REGION_TOP_BAR):
-                logging.critical('无法找到"私信"图标，无法进入好友列表，任务停止。')
-                break
+        sixin_text = recognizer.get_ocr_text("ocr_text_sixin") or "消息"
+        if not recognizer.click_element(sixin_text, region=REGION_TOP_BAR, timeout=5):
+            logging.critical(f'无法找到"{sixin_text}"，无法进入好友列表，任务停止。')
+            break
         time.sleep(2)
 
         if avatar_text:
-            if not find_friend_with_scrolling(engine, avatar_text):
+            if not find_friend_with_scrolling(recognizer, avatar_text):
                 logging.warning(f"⚠️ 跳过：无法在列表中找到好友 {nickname}。")
                 continue
         elif avatar_path:
@@ -310,7 +301,7 @@ def run_bot_task():
             if not os.path.exists(avatar_absolute_path):
                 logging.warning(f"⚠️ 跳过：好友 {nickname} 的头像文件不存在: {avatar_path}")
                 continue
-            if not find_friend_with_scrolling(engine, avatar_absolute_path):
+            if not find_friend_with_scrolling(recognizer, avatar_absolute_path):
                 logging.warning(f"⚠️ 跳过：无法在列表中找到好友 {nickname}。")
                 continue
         else:
@@ -319,42 +310,55 @@ def run_bot_task():
 
         time.sleep(2)
 
-        try:
-            weather_message = get_weather_data(city_name, nickname, api_key, api_host, location_id, message_template)
-        except RequestException as e:
-            logging.error(f"天气接口请求失败（重试后仍失败）: {e}")
-            weather_message = None
+        message = None
+        if active_preset and active_preset.get('use_weather_api'):
+            try:
+                message = get_weather_data(city_name, nickname, api_key, api_host, location_id, active_preset.get('template'))
+            except RequestException as e:
+                logging.error(f"天气接口请求失败: {e}")
+        elif active_preset:
+            message = msg_manager.format_message(active_preset['id'], {"nickname": nickname})
 
-        if weather_message:
-            logging.info("正在粘贴并发送消息...")
-            pyperclip.copy(weather_message)
-            pyautogui.hotkey('ctrl', 'v')
-            time.sleep(1.5)
+        if message:
+            start_time = time.time()
+            success = _send_message_with_retry(recognizer, message)
+            duration_ms = int((time.time() - start_time) * 1000)
 
-            if engine.ocr_client:
-                send_success = engine.find_and_click_text(_ocr_texts["send"], region=REGION_CHAT_WINDOW_BOTTOM)
-            else:
-                send_button = _control_image_path('douyin_send_button.png')
-                send_success = engine.find_and_click_image(send_button, region=REGION_CHAT_WINDOW_BOTTOM)
+            log_send(nickname, message, success, method="hybrid", duration_ms=duration_ms)
 
-            if send_success:
+            if success:
                 logging.info(f"✅ 发送成功 -> {nickname}")
                 time.sleep(1)
 
-                if engine.ocr_client:
-                    exit_success = engine.find_and_click_text(_ocr_texts["exit"], region=REGION_CHAT_WINDOW_TOP)
-                else:
-                    exit_button = _control_image_path('douyin_exit_chat_button.png')
-                    exit_success = engine.find_and_click_image(exit_button, region=REGION_CHAT_WINDOW_TOP)
-
-                if not exit_success:
-                    logging.error('⚠️ 警告：未能点击"退出会话"按钮，可能会影响下一位好友的查找。')
+                send_text = recognizer.get_ocr_text("ocr_text_exit") or "退出会话"
+                if not recognizer.click_element(send_text, region=REGION_CHAT_WINDOW_TOP):
+                    logging.error('⚠️ 未能点击"退出会话"按钮')
             else:
-                logging.warning('❌ 发送失败：找不到"发送"按钮。')
+                logging.warning(f"❌ 发送失败 -> {nickname}")
 
         time.sleep(3)
 
     logging.info("🎉 所有任务执行完毕。")
+
+
+def _send_message_with_retry(recognizer, message, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            pyperclip.copy(message)
+            pyautogui.hotkey('ctrl', 'v')
+            time.sleep(1)
+
+            send_text = recognizer.get_ocr_text("ocr_text_send") or "发送"
+            if recognizer.click_element(send_text, region=REGION_CHAT_WINDOW_BOTTOM, timeout=3):
+                return True
+
+            logging.warning(f"第{attempt+1}次发送尝试失败")
+            time.sleep(2)
+        except Exception as e:
+            logging.error(f"发送异常 (第{attempt+1}次): {e}")
+            time.sleep(2)
+
+    return False
 
 
 def main():

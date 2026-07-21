@@ -2,14 +2,14 @@ import sys
 import os
 import signal
 import logging
+import json
 from logging.handlers import RotatingFileHandler
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
-from PySide6.QtGui import QIcon, QAction
-from PySide6.QtCore import Qt
 
-from config_utils import project_path
-from ui.main_window import MainWindow
-from ui.qt_log_handler import QtLogHandler
+import dearpygui.dearpygui as dpg
+
+from config_utils import project_path, load_config
+
+dpg.create_context()
 
 
 def setup_logging():
@@ -31,70 +31,44 @@ def setup_logging():
     return logger
 
 
-def main():
-    app = QApplication(sys.argv)
-    app.setApplicationName("抖音天气助手")
-    app.setApplicationDisplayName("抖音天气助手")
-    app.setOrganizationName("DouyinWeatherHelper")
-
-    logger = setup_logging()
-    qt_log_handler = QtLogHandler()
-    logger.addHandler(qt_log_handler)
-
+def load_window_config():
     try:
-        icon_path = project_path('control_images', 'douyin_sixin_icon.png')
-        if os.path.exists(icon_path):
-            app.setWindowIcon(QIcon(icon_path))
+        cfg = load_config()
+        ui_cfg = cfg.get('ui', {})
+        mode = ui_cfg.get('window_mode', 'normal')
+        if mode == 'compact':
+            return ui_cfg.get('compact_size', [900, 600])
+        elif mode == 'mini':
+            return ui_cfg.get('mini_size', [500, 400])
+        return [1100, 750]
     except Exception:
-        pass
+        return [1100, 750]
 
-    window = MainWindow()
-    window.setLogHandler(qt_log_handler)
 
-    def handle_exception(exc_type, exc_value, exc_traceback):
-        if issubclass(exc_type, KeyboardInterrupt):
-            sys.__excepthook__(exc_type, exc_value, exc_traceback)
-            return
-        logging.error("未捕获的异常", exc_info=(exc_type, exc_value, exc_traceback))
-        QMessageBox.critical(None, "程序错误", f"发生未预期的错误：\n{exc_value}")
+def main():
+    logger = setup_logging()
+    logger.info("抖音天气助手 v6.0 启动中...")
 
-    sys.excepthook = handle_exception
+    size = load_window_config()
 
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    dpg.create_viewport(
+        title="抖音天气助手 v6.0",
+        width=size[0],
+        height=size[1],
+        min_size=[500, 400],
+        resizable=True,
+    )
 
-    tray_icon = None
-    if QSystemTrayIcon.isSystemTrayAvailable():
-        tray_icon = QSystemTrayIcon(app.windowIcon(), app)
-        tray_icon.setToolTip("抖音天气助手 - 正在运行")
+    from ui.dpg_app import DPGApp
+    app = DPGApp(logger)
+    app.build()
 
-        tray_menu = QMenu()
-        show_action = QAction("显示主窗口", app)
-        show_action.triggered.connect(window.showNormal)
-        show_action.triggered.connect(window.activateWindow)
-        tray_menu.addAction(show_action)
-
-        run_action = QAction("立即执行任务", app)
-        run_action.triggered.connect(window.runTaskNow)
-        tray_menu.addAction(run_action)
-
-        tray_menu.addSeparator()
-
-        quit_action = QAction("退出", app)
-        quit_action.triggered.connect(app.quit)
-        tray_menu.addAction(quit_action)
-
-        tray_icon.setContextMenu(tray_menu)
-        tray_icon.activated.connect(
-            lambda reason: window.showNormal() if reason == QSystemTrayIcon.DoubleClick else None
-        )
-        tray_icon.show()
-
-        window.setTrayIcon(tray_icon)
-
-    window.show()
-
-    sys.exit(app.exec())
+    dpg.setup_dearpygui()
+    dpg.show_viewport()
+    dpg.start_dearpygui()
+    dpg.destroy_context()
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     main()
