@@ -3,6 +3,7 @@ import os
 import time
 import threading
 import logging
+import requests
 from datetime import datetime
 
 import dearpygui.dearpygui as dpg
@@ -11,44 +12,10 @@ import psutil
 from config_utils import project_path, load_config, save_config
 
 
-def setup_theme():
-    with dpg.theme() as global_theme:
-        with dpg.theme_component(dpg.mvAll):
-            dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (245, 247, 250))
-            dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (255, 255, 255))
-            dpg.add_theme_color(dpg.mvThemeCol_Text, (44, 62, 80))
-            dpg.add_theme_color(dpg.mvThemeCol_Button, (26, 188, 156))
-            dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (22, 160, 133))
-            dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (20, 144, 120))
-            dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (255, 255, 255))
-            dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, (240, 240, 240))
-            dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, (230, 230, 230))
-            dpg.add_theme_color(dpg.mvThemeCol_Tab, (245, 247, 250))
-            dpg.add_theme_color(dpg.mvThemeCol_TabHovered, (26, 188, 156))
-            dpg.add_theme_color(dpg.mvThemeCol_TabActive, (26, 188, 156))
-            dpg.add_theme_color(dpg.mvThemeCol_TabSelected, (26, 188, 156))
-            dpg.add_theme_color(dpg.mvThemeCol_Header, (240, 240, 240))
-            dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, (220, 220, 220))
-            dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, (200, 200, 200))
-            dpg.add_theme_color(dpg.mvThemeCol_ScrollbarBg, (245, 247, 250))
-            dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrab, (189, 195, 199))
-            dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabHovered, (149, 165, 166))
-            dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabActive, (127, 140, 141))
-            dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 8)
-            dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, 6)
-            dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 4)
-            dpg.add_theme_style(dpg.mvStyleVar_TabRounding, 4)
-            dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 12, 12)
-            dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 8, 4)
-            dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 8, 6)
-    dpg.bind_theme(global_theme)
-
-
 class DPGApp:
     def __init__(self, logger):
         self.logger = logger
         self.worker = None
-        self.log_messages = []
         self.douyin_running = False
         self.scheduled_time = "08:00"
         self.scheduler_enabled = True
@@ -56,9 +23,42 @@ class DPGApp:
         self._load_scheduler_config()
 
     def build(self):
-        setup_theme()
+        with dpg.theme() as light_theme:
+            with dpg.theme_component(dpg.mvAll):
+                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (240, 242, 245))
+                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (255, 255, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_PopupBg, (255, 255, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (51, 51, 51))
+                dpg.add_theme_color(dpg.mvThemeCol_TextDisabled, (160, 160, 160))
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (26, 188, 156))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (22, 160, 133))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (20, 144, 120))
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (255, 255, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, (245, 247, 250))
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, (235, 237, 240))
+                dpg.add_theme_color(dpg.mvThemeCol_Border, (220, 220, 220))
+                dpg.add_theme_color(dpg.mvThemeCol_Tab, (240, 242, 245))
+                dpg.add_theme_color(dpg.mvThemeCol_TabHovered, (26, 188, 156))
+                dpg.add_theme_color(dpg.mvThemeCol_TabActive, (26, 188, 156))
+                dpg.add_theme_color(dpg.mvThemeCol_TabSelected, (26, 188, 156))
+                dpg.add_theme_color(dpg.mvThemeCol_Header, (240, 242, 245))
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, (220, 220, 220))
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, (200, 200, 200))
+                dpg.add_theme_color(dpg.mvThemeCol_Separator, (220, 220, 220))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarBg, (240, 242, 245))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrab, (189, 195, 199))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabHovered, (149, 165, 166))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabActive, (127, 140, 141))
+                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 8)
+                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, 6)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 4)
+                dpg.add_theme_style(dpg.mvStyleVar_TabRounding, 4)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 16, 16)
+                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 8, 6)
+                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 8, 8)
+        dpg.bind_theme(light_theme)
 
-        with dpg.window(tag="main_window", pos=(0, 0)):
+        with dpg.window(tag="main_window"):
             with dpg.tab_bar():
                 with dpg.tab(label="仪表盘"):
                     self._build_dashboard()
@@ -85,41 +85,39 @@ class DPGApp:
 
     def _build_dashboard(self):
         with dpg.group(horizontal=True):
-            with dpg.child_window(width=220, height=120, tag="dash_card1"):
+            with dpg.child_window(width=220, height=120):
                 dpg.add_text("好友数量")
                 self.friends_count = dpg.add_text("0", color=(26, 188, 156))
                 dpg.add_text("识别模式")
                 self.ocr_mode_text = dpg.add_text("图像识别", color=(52, 152, 219))
 
-            with dpg.child_window(width=220, height=120, tag="dash_card2"):
+            with dpg.child_window(width=220, height=120):
                 dpg.add_text("调度状态")
                 self.schedule_status = dpg.add_text("未启用", color=(231, 76, 60))
                 dpg.add_text("执行时间")
                 self.schedule_time = dpg.add_text("08:00", color=(155, 89, 182))
 
-            with dpg.child_window(width=220, height=120, tag="dash_card3"):
+            with dpg.child_window(width=220, height=120):
                 dpg.add_text("抖音状态")
                 self.douyin_dashboard_status = dpg.add_text("检测中...", color=(255, 165, 0))
                 dpg.add_text("今日已发送")
                 self.sent_count = dpg.add_text("0", color=(26, 188, 156))
 
         dpg.add_spacer(height=10)
-
         with dpg.group(horizontal=True):
             dpg.add_button(label="立即执行任务", callback=self._run_task_now, width=150, height=35)
             dpg.add_button(label="刷新状态", callback=self._refresh_dashboard, width=100, height=35)
-
         self._refresh_dashboard()
 
     def _build_config(self):
         with dpg.child_window():
-            dpg.add_text("天气API配置", color=(44, 62, 80))
+            dpg.add_text("天气API配置")
             self.api_host_input = dpg.add_input_text(label="API Host", width=400)
             self.api_key_input = dpg.add_input_text(label="API Key", width=400, password=True)
             dpg.add_button(label="测试连接", callback=self._test_api, width=100)
             dpg.add_spacer(height=10)
 
-            dpg.add_text("消息模板", color=(44, 62, 80))
+            dpg.add_text("消息模板")
             self.message_template_input = dpg.add_input_text(
                 multiline=True, width=-1, height=100,
                 default_value="Hi {nickname}，你所在的{city_name}今天..."
@@ -127,45 +125,77 @@ class DPGApp:
             dpg.add_text("变量: {nickname}, {city_name}, {text_day}, {temp_max}, {temp_min}")
 
             dpg.add_spacer(height=10)
-            dpg.add_text("OCR配置", color=(44, 62, 80))
+            dpg.add_text("OCR配置")
             self.use_local_ocr = dpg.add_checkbox(label="启用本地OCR识别（推荐）", default_value=True)
             self.ocr_api_key_input = dpg.add_input_text(label="百度OCR Key", width=350, password=True)
             self.ocr_secret_input = dpg.add_input_text(label="百度OCR Secret", width=350, password=True)
+            dpg.add_button(label="测试OCR", callback=self._test_ocr, width=100)
 
             dpg.add_spacer(height=10)
             dpg.add_button(label="保存配置", callback=self._save_config, width=150, height=35)
-
         self._load_config_values()
+
+    def _test_api(self, sender, app_data):
+        host = dpg.get_value(self.api_host_input).strip()
+        key = dpg.get_value(self.api_key_input).strip()
+        if not host or not key:
+            self._show_toast("请先填写 API Host 和 API Key")
+            return
+        try:
+            url = f"https://{host}/v7/weather/now?location=101010100&key={key}"
+            resp = requests.get(url, timeout=5)
+            data = resp.json()
+            if data.get("code") == "200":
+                self._show_toast("API 连接成功！")
+            else:
+                self._show_toast(f"API 返回错误码: {data.get('code')}")
+        except Exception as e:
+            self._show_toast(f"连接失败: {e}")
+
+    def _test_ocr(self, sender, app_data):
+        api_key = dpg.get_value(self.ocr_api_key_input).strip()
+        secret = dpg.get_value(self.ocr_secret_input).strip()
+        if not api_key or not secret:
+            self._show_toast("请先填写 OCR API Key 和 Secret Key")
+            return
+        try:
+            token_url = "https://aip.baidubce.com/oauth/2.0/token"
+            resp = requests.post(token_url, params={
+                "grant_type": "client_credentials",
+                "client_id": api_key,
+                "client_secret": secret,
+            }, timeout=5)
+            data = resp.json()
+            if "access_token" in data:
+                self._show_toast("百度OCR 连接成功！")
+            else:
+                self._show_toast(f"获取Token失败: {data.get('error_description', 'unknown')}")
+        except Exception as e:
+            self._show_toast(f"连接失败: {e}")
 
     def _build_messages(self):
         with dpg.child_window():
-            dpg.add_text("消息预设库", color=(44, 62, 80))
+            dpg.add_text("消息预设库")
             dpg.add_text("管理自定义消息模板")
-
             with dpg.group(horizontal=True):
                 dpg.add_button(label="新建预设", callback=self._new_preset, width=100)
                 dpg.add_button(label="导入", callback=self._import_presets, width=80)
                 dpg.add_button(label="导出", callback=self._export_presets, width=80)
-
             dpg.add_spacer(height=5)
             self.presets_list = dpg.add_listbox([], width=-1, num_items=8, callback=self._on_preset_select)
-
             dpg.add_spacer(height=5)
-            dpg.add_text("编辑预设", color=(44, 62, 80))
+            dpg.add_text("编辑预设")
             self.preset_name_input = dpg.add_input_text(label="名称", width=300)
             self.preset_weather_check = dpg.add_checkbox(label="使用天气API")
             self.preset_template_input = dpg.add_input_text(label="消息模板", multiline=True, width=-1, height=80)
-
             with dpg.group(horizontal=True):
                 dpg.add_button(label="保存预设", callback=self._save_preset, width=120)
                 dpg.add_button(label="删除预设", callback=self._delete_preset, width=120)
-
         self._load_presets()
 
     def _build_ui_config(self):
         with dpg.child_window():
-            dpg.add_text("抖音界面配置", color=(44, 62, 80))
-
+            dpg.add_text("抖音界面配置")
             with dpg.tab_bar():
                 with dpg.tab(label="控制图像"):
                     self._build_image_config()
@@ -176,13 +206,11 @@ class DPGApp:
 
     def _build_image_config(self):
         dpg.add_text("控制图像用于图像匹配模式")
-
         images = [
             ("douyin_sixin_icon.png", "私信图标"),
             ("douyin_send_button.png", "发送按钮"),
             ("douyin_exit_chat_button.png", "退出会话"),
         ]
-
         self.image_widgets = {}
         for filename, name in images:
             with dpg.group(horizontal=True):
@@ -195,66 +223,56 @@ class DPGApp:
 
     def _build_ocr_text_config(self):
         dpg.add_text("OCR识别文字配置")
-
         self.ocr_text_widgets = {}
         texts = [
             ("ocr_text_sixin", "私信/消息", "消息"),
             ("ocr_text_send", "发送", "发送"),
             ("ocr_text_exit", "退出会话", "退出会话"),
         ]
-
         for key, name, default in texts:
             self.ocr_text_widgets[key] = dpg.add_input_text(label=name, default_value=default, width=200)
-
         dpg.add_button(label="保存OCR文字", callback=self._save_ocr_texts, width=120)
 
     def _build_region_config(self):
         dpg.add_text("屏幕区域配置（百分比 0.0~1.0）")
-
         regions = [
             ("top_bar", "私信图标区域", 0.65, 0.0, 0.25, 0.10),
             ("friend_list", "好友列表区域", 0.75, 0.10, 0.25, 0.85),
             ("chat_bottom", "发送按钮区域", 0.30, 0.85, 0.65, 0.10),
             ("chat_top", "退出会话区域", 0.70, 0.10, 0.25, 0.10),
         ]
-
         self.region_widgets = {}
         for key, name, x, y, w, h in regions:
-            dpg.add_text(name, color=(44, 62, 80))
+            dpg.add_text(name)
             with dpg.group(horizontal=True):
                 self.region_widgets[f"{key}_x"] = dpg.add_input_text(label="X", default_value=str(x), width=60)
                 self.region_widgets[f"{key}_y"] = dpg.add_input_text(label="Y", default_value=str(y), width=60)
                 self.region_widgets[f"{key}_w"] = dpg.add_input_text(label="宽", default_value=str(w), width=60)
                 self.region_widgets[f"{key}_h"] = dpg.add_input_text(label="高", default_value=str(h), width=60)
-
         dpg.add_button(label="保存区域配置", callback=self._save_regions, width=120)
 
     def _build_monitor(self):
         with dpg.child_window():
-            dpg.add_text("任务监控", color=(44, 62, 80))
-
+            dpg.add_text("任务监控")
             with dpg.group(horizontal=True):
                 self.proc_memory = dpg.add_text("内存: --MB")
                 dpg.add_text("|")
                 self.proc_cpu = dpg.add_text("CPU: --%")
-
             dpg.add_spacer(height=5)
             dpg.add_text("运行日志:")
             self.log_window = dpg.add_input_text(multiline=True, width=-1, height=400, readonly=True)
-
             with dpg.group(horizontal=True):
                 dpg.add_button(label="清除日志", callback=self._clear_logs, width=100)
                 dpg.add_button(label="导出日志", callback=self._export_logs, width=100)
 
     def _build_scheduler(self):
         with dpg.child_window():
-            dpg.add_text("调度设置", color=(44, 62, 80))
+            dpg.add_text("调度设置")
             self.scheduler_enabled_check = dpg.add_checkbox(label="启用定时调度", default_value=self.scheduler_enabled)
             self.schedule_time_input = dpg.add_input_text(label="执行时间 (HH:MM)", default_value=self.scheduled_time, width=150)
             dpg.add_button(label="保存调度设置", callback=self._save_scheduler, width=150)
-
             dpg.add_spacer(height=10)
-            dpg.add_text("进程监控", color=(44, 62, 80))
+            dpg.add_text("进程监控")
             self.monitor_enabled = dpg.add_checkbox(label="启用进程监控", default_value=True)
             self.max_memory_input = dpg.add_input_text(label="最大内存(MB)", default_value="500", width=100)
             self.max_cpu_input = dpg.add_input_text(label="最大CPU(%)", default_value="80", width=100)
@@ -417,7 +435,6 @@ class DPGApp:
             from douyin_bot import run_bot_task
             run_bot_task()
             dpg.set_value(self.status_text, "任务完成")
-            self.logger.info("任务执行完毕")
         except Exception as e:
             dpg.set_value(self.status_text, f"任务失败: {e}")
             self.logger.error(f"任务失败: {e}")
@@ -444,9 +461,6 @@ class DPGApp:
 
     def _save_monitor_config(self, sender, app_data):
         self._show_toast("监控设置已保存")
-
-    def _test_api(self, sender, app_data):
-        self._show_toast("API测试功能待实现")
 
     def _clear_logs(self, sender, app_data):
         dpg.set_value(self.log_window, "")
