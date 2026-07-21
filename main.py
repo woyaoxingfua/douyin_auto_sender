@@ -31,6 +31,19 @@ def setup_logging():
     return logger
 
 
+def load_chinese_font():
+    font_paths = [
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/msyhbd.ttc",
+        "C:/Windows/Fonts/simsun.ttc",
+        "C:/Windows/Fonts/simhei.ttf",
+    ]
+    for path in font_paths:
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def load_window_config():
     try:
         cfg = load_config()
@@ -50,6 +63,13 @@ def main():
     logger.info("抖音天气助手 v6.0 启动中...")
 
     size = load_window_config()
+
+    font_path = load_chinese_font()
+    if font_path:
+        with dpg.font_registry():
+            with dpg.font(font_path, 16) as default_font:
+                pass
+        dpg.bind_font(default_font)
 
     dpg.create_viewport(
         title="抖音天气助手 v6.0",
