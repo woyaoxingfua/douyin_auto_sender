@@ -512,9 +512,10 @@ class DPGApp:
         self._show_toast("日志导出待实现")
 
     def _show_toast(self, message):
-        with dpg.window(label="提示", modal=False, width=300, height=100, pos=[400, 300]):
+        tag = f"toast_{int(time.time())}"
+        with dpg.window(label="提示", modal=False, width=300, height=100, pos=[400, 300], tag=tag):
             dpg.add_text(message)
-            dpg.add_button(label="确定", width=80, callback=lambda: dpg.delete_item(dpg.last_item().parent))
+            dpg.add_button(label="确定", width=80, callback=lambda: dpg.delete_item(tag))
 
     def _start_background_tasks(self):
         def update_stats():
