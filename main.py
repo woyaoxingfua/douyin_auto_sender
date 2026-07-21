@@ -55,7 +55,8 @@ def main():
         title="抖音天气助手 v6.0",
         width=size[0],
         height=size[1],
-        min_size=[500, 400],
+        min_width=500,
+        min_height=400,
         resizable=True,
     )
 
