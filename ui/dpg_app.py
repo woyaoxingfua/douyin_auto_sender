@@ -115,7 +115,7 @@ class DPGApp:
                 dpg.add_button(label="导出", callback=self._export_presets, width=80)
 
             dpg.add_spacer(height=5)
-            self.presets_list = dpg.add_listbox([], width=-1, height=150, callback=self._on_preset_select)
+            self.presets_list = dpg.add_listbox([], width=-1, num_items=10, callback=self._on_preset_select)
 
             dpg.add_spacer(height=5)
             dpg.add_text("编辑预设", color=(44, 62, 80))
