@@ -11,6 +11,39 @@ import psutil
 from config_utils import project_path, load_config, save_config
 
 
+def setup_theme():
+    with dpg.theme() as global_theme:
+        with dpg.theme_component(dpg.mvAll):
+            dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (245, 247, 250))
+            dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (255, 255, 255))
+            dpg.add_theme_color(dpg.mvThemeCol_Text, (44, 62, 80))
+            dpg.add_theme_color(dpg.mvThemeCol_Button, (26, 188, 156))
+            dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (22, 160, 133))
+            dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (20, 144, 120))
+            dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (255, 255, 255))
+            dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, (240, 240, 240))
+            dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, (230, 230, 230))
+            dpg.add_theme_color(dpg.mvThemeCol_Tab, (245, 247, 250))
+            dpg.add_theme_color(dpg.mvThemeCol_TabHovered, (26, 188, 156))
+            dpg.add_theme_color(dpg.mvThemeCol_TabActive, (26, 188, 156))
+            dpg.add_theme_color(dpg.mvThemeCol_TabSelected, (26, 188, 156))
+            dpg.add_theme_color(dpg.mvThemeCol_Header, (240, 240, 240))
+            dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, (220, 220, 220))
+            dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, (200, 200, 200))
+            dpg.add_theme_color(dpg.mvThemeCol_ScrollbarBg, (245, 247, 250))
+            dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrab, (189, 195, 199))
+            dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabHovered, (149, 165, 166))
+            dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabActive, (127, 140, 141))
+            dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 8)
+            dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, 6)
+            dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 4)
+            dpg.add_theme_style(dpg.mvStyleVar_TabRounding, 4)
+            dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 12, 12)
+            dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 8, 4)
+            dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 8, 6)
+    dpg.bind_theme(global_theme)
+
+
 class DPGApp:
     def __init__(self, logger):
         self.logger = logger
@@ -23,7 +56,9 @@ class DPGApp:
         self._load_scheduler_config()
 
     def build(self):
-        with dpg.window(tag="main_window"):
+        setup_theme()
+
+        with dpg.window(tag="main_window", pos=(0, 0)):
             with dpg.tab_bar():
                 with dpg.tab(label="仪表盘"):
                     self._build_dashboard()
@@ -39,40 +74,40 @@ class DPGApp:
                     self._build_scheduler()
 
             with dpg.group(horizontal=True):
-                self.status_text = dpg.add_text("就绪", color=(100, 100, 100))
+                self.status_text = dpg.add_text("就绪")
                 dpg.add_spacer(width=20)
                 self.douyin_status = dpg.add_text("抖音: 检测中...", color=(255, 165, 0))
                 dpg.add_spacer(width=20)
-                self.process_text = dpg.add_text("内存: --MB  CPU: --%", color=(100, 100, 100))
+                self.process_text = dpg.add_text("内存: --MB  CPU: --%")
 
         dpg.set_primary_window("main_window", True)
         self._start_background_tasks()
 
     def _build_dashboard(self):
         with dpg.group(horizontal=True):
-            with dpg.child_window(width=220, height=120):
-                dpg.add_text("好友数量", color=(100, 100, 100))
+            with dpg.child_window(width=220, height=120, tag="dash_card1"):
+                dpg.add_text("好友数量")
                 self.friends_count = dpg.add_text("0", color=(26, 188, 156))
-                dpg.add_text("识别模式", color=(100, 100, 100))
+                dpg.add_text("识别模式")
                 self.ocr_mode_text = dpg.add_text("图像识别", color=(52, 152, 219))
 
-            with dpg.child_window(width=220, height=120):
-                dpg.add_text("调度状态", color=(100, 100, 100))
+            with dpg.child_window(width=220, height=120, tag="dash_card2"):
+                dpg.add_text("调度状态")
                 self.schedule_status = dpg.add_text("未启用", color=(231, 76, 60))
-                dpg.add_text("执行时间", color=(100, 100, 100))
+                dpg.add_text("执行时间")
                 self.schedule_time = dpg.add_text("08:00", color=(155, 89, 182))
 
-            with dpg.child_window(width=220, height=120):
-                dpg.add_text("抖音状态", color=(100, 100, 100))
+            with dpg.child_window(width=220, height=120, tag="dash_card3"):
+                dpg.add_text("抖音状态")
                 self.douyin_dashboard_status = dpg.add_text("检测中...", color=(255, 165, 0))
-                dpg.add_text("今日已发送", color=(100, 100, 100))
+                dpg.add_text("今日已发送")
                 self.sent_count = dpg.add_text("0", color=(26, 188, 156))
 
         dpg.add_spacer(height=10)
 
         with dpg.group(horizontal=True):
-            dpg.add_button(label="立即执行任务", callback=self._run_task_now, width=150, height=40)
-            dpg.add_button(label="刷新状态", callback=self._refresh_dashboard, width=100, height=40)
+            dpg.add_button(label="立即执行任务", callback=self._run_task_now, width=150, height=35)
+            dpg.add_button(label="刷新状态", callback=self._refresh_dashboard, width=100, height=35)
 
         self._refresh_dashboard()
 
@@ -81,7 +116,6 @@ class DPGApp:
             dpg.add_text("天气API配置", color=(44, 62, 80))
             self.api_host_input = dpg.add_input_text(label="API Host", width=400)
             self.api_key_input = dpg.add_input_text(label="API Key", width=400, password=True)
-
             dpg.add_button(label="测试连接", callback=self._test_api, width=100)
             dpg.add_spacer(height=10)
 
@@ -90,8 +124,7 @@ class DPGApp:
                 multiline=True, width=-1, height=100,
                 default_value="Hi {nickname}，你所在的{city_name}今天..."
             )
-            dpg.add_text("可用变量: {nickname}, {city_name}, {text_day}, {temp_max}, {temp_min}",
-                         color=(127, 140, 141))
+            dpg.add_text("变量: {nickname}, {city_name}, {text_day}, {temp_max}, {temp_min}")
 
             dpg.add_spacer(height=10)
             dpg.add_text("OCR配置", color=(44, 62, 80))
@@ -107,7 +140,7 @@ class DPGApp:
     def _build_messages(self):
         with dpg.child_window():
             dpg.add_text("消息预设库", color=(44, 62, 80))
-            dpg.add_text("管理自定义消息模板", color=(127, 140, 141))
+            dpg.add_text("管理自定义消息模板")
 
             with dpg.group(horizontal=True):
                 dpg.add_button(label="新建预设", callback=self._new_preset, width=100)
@@ -115,7 +148,7 @@ class DPGApp:
                 dpg.add_button(label="导出", callback=self._export_presets, width=80)
 
             dpg.add_spacer(height=5)
-            self.presets_list = dpg.add_listbox([], width=-1, num_items=10, callback=self._on_preset_select)
+            self.presets_list = dpg.add_listbox([], width=-1, num_items=8, callback=self._on_preset_select)
 
             dpg.add_spacer(height=5)
             dpg.add_text("编辑预设", color=(44, 62, 80))
@@ -142,7 +175,7 @@ class DPGApp:
                     self._build_region_config()
 
     def _build_image_config(self):
-        dpg.add_text("控制图像用于图像匹配模式", color=(127, 140, 141))
+        dpg.add_text("控制图像用于图像匹配模式")
 
         images = [
             ("douyin_sixin_icon.png", "私信图标"),
@@ -161,7 +194,7 @@ class DPGApp:
                 dpg.add_button(label="上传", callback=lambda s, a, u: self._upload_image(u), user_data=filename, width=60)
 
     def _build_ocr_text_config(self):
-        dpg.add_text("OCR识别文字配置", color=(127, 140, 141))
+        dpg.add_text("OCR识别文字配置")
 
         self.ocr_text_widgets = {}
         texts = [
@@ -176,7 +209,7 @@ class DPGApp:
         dpg.add_button(label="保存OCR文字", callback=self._save_ocr_texts, width=120)
 
     def _build_region_config(self):
-        dpg.add_text("屏幕区域配置（百分比 0.0~1.0）", color=(127, 140, 141))
+        dpg.add_text("屏幕区域配置（百分比 0.0~1.0）")
 
         regions = [
             ("top_bar", "私信图标区域", 0.65, 0.0, 0.25, 0.10),
@@ -201,12 +234,12 @@ class DPGApp:
             dpg.add_text("任务监控", color=(44, 62, 80))
 
             with dpg.group(horizontal=True):
-                self.proc_memory = dpg.add_text("内存: --MB", color=(100, 100, 100))
-                dpg.add_text("|", color=(100, 100, 100))
-                self.proc_cpu = dpg.add_text("CPU: --%", color=(100, 100, 100))
+                self.proc_memory = dpg.add_text("内存: --MB")
+                dpg.add_text("|")
+                self.proc_cpu = dpg.add_text("CPU: --%")
 
             dpg.add_spacer(height=5)
-            dpg.add_text("运行日志:", color=(44, 62, 80))
+            dpg.add_text("运行日志:")
             self.log_window = dpg.add_input_text(multiline=True, width=-1, height=400, readonly=True)
 
             with dpg.group(horizontal=True):
