@@ -2106,8 +2106,8 @@ class DPGApp:
                             self.logger.debug(f"Mini 窗更新异常: {e}")
                 except Exception as e:
                     self.logger.debug(f"后台任务异常: {e}", exc_info=True)
-                # 控制循环速度
-                time.sleep(1)
+                # 控制循环速度（Mini 窗停止/恢复请求需要及时响应）
+                time.sleep(0.2)
         threading.Thread(target=update, daemon=True).start()
 
     # ─── 调度配置加载 ───
@@ -2176,12 +2176,14 @@ class DPGApp:
     def _enter_mini_mode(self):
         self._mini_mode = True
         self.logger.info("正在切换到 Mini 悬浮窗...")
+        if self.mini_window:
+            self.mini_window.show()
         self._hide_main_window()
         self._update_mini_window()
         with _dpg_locked():
             if dpg.does_item_exist(self.tag('mini_mode_btn')):
                 dpg.set_item_label(self.tag('mini_mode_btn'), "⛶ 恢复")
-        self.logger.info("已切换到 Mini 悬浮窗，主窗口已最小化")
+        self.logger.info("已切换到 Mini 悬浮窗，主窗口已隐藏")
 
     def _exit_mini_mode(self):
         self._mini_mode = False
