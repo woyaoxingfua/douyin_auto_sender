@@ -44,10 +44,39 @@ def _get_ui_regions():
     """
     default_regions = {
         "top_bar": {"x_pct": 0.65, "y_pct": 0.0, "w_pct": 0.25, "h_pct": 0.10},
-        "friend_list": {"x_pct": 0.75, "y_pct": 0.10, "w_pct": 0.25, "h_pct": 0.85},
-        "chat_bottom": {"x_pct": 0.30, "y_pct": 0.85, "w_pct": 0.65, "h_pct": 0.10},
-        "chat_top": {"x_pct": 0.70, "y_pct": 0.10, "w_pct": 0.25, "h_pct": 0.10},
+        "friend_list": {"x_pct": 0.0, "y_pct": 0.08, "w_pct": 0.42, "h_pct": 0.88},
+        "chat_bottom": {"x_pct": 0.42, "y_pct": 0.85, "w_pct": 0.56, "h_pct": 0.10},
+        "chat_top": {"x_pct": 0.70, "y_pct": 0.08, "w_pct": 0.28, "h_pct": 0.10},
     }
+
+    def _is_region_sane(name, region):
+        if name == 'top_bar':
+            return (
+                region.get('h_pct', 0) <= 0.20 and
+                region.get('w_pct', 0) <= 0.50 and
+                region.get('y_pct', 0) <= 0.30
+            )
+        if name == 'friend_list':
+            # 消息页好友列表在左侧，旧配置若放在右侧则不合理
+            return (
+                region.get('x_pct', 0) <= 0.50 and
+                region.get('w_pct', 0) <= 0.65 and
+                region.get('h_pct', 0) >= 0.50
+            )
+        return True
+
+    # 加载用户自定义 UI 区域配置
+    user_regions = {}
+    try:
+        user_regions = config_store.get_ui_regions()
+    except Exception:
+        pass
+
+    # 检测用户自定义区域是否合理
+    invalid_regions = [k for k in user_regions if not _is_region_sane(k, user_regions[k])]
+    if invalid_regions:
+        logging.warning(f"用户自定义区域配置异常 {invalid_regions}, 强制使用默认值")
+
     # 尝试获取抖音窗口实际位置和尺寸
     from douyin_monitor import get_douyin_screenshot_rect
     douyin_rect = get_douyin_screenshot_rect()
@@ -61,6 +90,9 @@ def _get_ui_regions():
         logging.info(f"clamp 后窗口原点: ({dx},{dy}), 尺寸: {dw}x{dh}")
         regions = {}
         for key, r in default_regions.items():
+            # 使用用户配置，但异常区域强制用默认
+            if key in user_regions and _is_region_sane(key, user_regions[key]):
+                r = {**r, **user_regions[key]}
             x = dx + int(r["x_pct"] * dw)
             y = dy + int(r["y_pct"] * dh)
             w = int(r["w_pct"] * dw)
@@ -73,9 +105,8 @@ def _get_ui_regions():
             regions[key] = (x, y, w, h)
         return regions
     else:
-        # 只有未找到抖音窗口时，才使用用户自定义的 UI 区域百分比
+        # 未找到抖音窗口时，允许用户自定义百分比覆盖（全屏回退模式）
         try:
-            user_regions = config_store.get_ui_regions()
             for key in default_regions:
                 if key in user_regions:
                     default_regions[key].update(user_regions[key])
@@ -125,6 +156,9 @@ def find_friend_with_scrolling(engine, friend_target, max_scrolls=20):
     logging.info(f"🔍 开始在列表查找好友: {friend_target}")
 
     for i in range(max_scrolls):
+        if _is_stop_requested():
+            logging.info("⏹ 收到停止请求，中断好友查找")
+            return False
         logging.debug(f"第 {i + 1} 次查找，目标={friend_target}")
         if engine.click_element(friend_target, confidence=0.75, timeout=3, region=REGION_FRIEND_LIST):
             logging.debug(f"找到并点击好友: {friend_target}")
@@ -140,6 +174,20 @@ def find_friend_with_scrolling(engine, friend_target, max_scrolls=20):
 
 def _control_image_path(file_name):
     return project_path('control_images', file_name)
+
+
+def _save_region_screenshot(name, region):
+    """保存指定区域的调试截图，便于确认 UI 区域是否覆盖目标元素。"""
+    try:
+        if not region or len(region) < 4:
+            return
+        x, y, w, h = region
+        screenshot = pyautogui.screenshot(region=(x, y, w, h))
+        path = project_path(f'last_{name}.png')
+        screenshot.save(path)
+        logging.info(f"已保存 {name} 区域截图: {path}, 区域={region}")
+    except Exception as e:
+        logging.warning(f"保存 {name} 区域截图失败: {e}")
 
 
 def _load_runtime_config():
@@ -179,9 +227,14 @@ def _enter_friend_list(recognizer, max_retries=2):
     mode = config_store.get_enter_private_msg_mode()
     logging.debug(f"进入好友列表模式: {mode}")
     for attempt in range(max_retries):
+        if _is_stop_requested():
+            logging.info("⏹ 收到停止请求，中断进入好友列表")
+            return False
         sixin_text = recognizer.get_ocr_text("ocr_text_sixin") or "消息"
         if recognizer.hover_or_click(sixin_text, region=REGION_TOP_BAR, timeout=5, mode=mode):
             time.sleep(2)
+            # 保存好友列表区域截图，便于诊断区域是否覆盖实际列表
+            _save_region_screenshot('friend_list', REGION_FRIEND_LIST)
             return True
         logging.warning(f"⚠️ 第{attempt+1}次尝试进入好友列表失败")
         time.sleep(3)
