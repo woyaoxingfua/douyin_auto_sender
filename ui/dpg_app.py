@@ -429,6 +429,8 @@ class DPGApp:
             with dpg.group(horizontal=True):
                 dpg.add_button(label="立即执行任务", width=160, height=36,
                                callback=self._run_task_now)
+                dpg.add_button(label="停止任务", width=120, height=36,
+                               callback=self._stop_task)
                 dpg.add_button(label="测试连接", width=120, height=36,
                                callback=self._test_all_connections)
                 dpg.add_button(label="打开日志文件", width=120, height=36,
@@ -1966,11 +1968,13 @@ class DPGApp:
         """请求停止当前任务（设置标志，任务线程在下个好友前检查）。"""
         if self._task_running:
             self._stop_flag.set()
-            self.logger.info("⏹ 已请求停止任务，将在当前好友处理完成后终止")
+            self.logger.info("⏹ 已请求停止任务")
+            self._show_toast("已请求停止任务")
             if self.mini_window:
-                self.mini_window.append_log(f"{datetime.now().strftime('%H:%M:%S')} ! 用户请求停止任务")
+                self.mini_window.append_log(f"{datetime.now().strftime('%H:%M:%S')} ! 已请求停止任务")
         else:
             self.logger.info("没有正在运行的任务")
+            self._show_toast("没有正在运行的任务")
 
     def _run_task_thread(self):
         self._task_running = True

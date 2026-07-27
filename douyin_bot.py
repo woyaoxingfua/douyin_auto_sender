@@ -44,24 +44,18 @@ def _get_ui_regions():
     """
     default_regions = {
         "top_bar": {"x_pct": 0.65, "y_pct": 0.0, "w_pct": 0.25, "h_pct": 0.10},
-        "friend_list": {"x_pct": 0.0, "y_pct": 0.08, "w_pct": 0.42, "h_pct": 0.88},
-        "chat_bottom": {"x_pct": 0.42, "y_pct": 0.85, "w_pct": 0.56, "h_pct": 0.10},
-        "chat_top": {"x_pct": 0.70, "y_pct": 0.08, "w_pct": 0.28, "h_pct": 0.10},
+        "friend_list": {"x_pct": 0.70, "y_pct": 0.10, "w_pct": 0.28, "h_pct": 0.85},
+        "chat_bottom": {"x_pct": 0.30, "y_pct": 0.85, "w_pct": 0.65, "h_pct": 0.10},
+        "chat_top": {"x_pct": 0.70, "y_pct": 0.10, "w_pct": 0.28, "h_pct": 0.10},
     }
 
     def _is_region_sane(name, region):
+        # 只强制校验 top_bar，避免旧配置把高度撑到 0.34 导致图像匹配异常
         if name == 'top_bar':
             return (
                 region.get('h_pct', 0) <= 0.20 and
                 region.get('w_pct', 0) <= 0.50 and
                 region.get('y_pct', 0) <= 0.30
-            )
-        if name == 'friend_list':
-            # 消息页好友列表在左侧，旧配置若放在右侧则不合理
-            return (
-                region.get('x_pct', 0) <= 0.50 and
-                region.get('w_pct', 0) <= 0.65 and
-                region.get('h_pct', 0) >= 0.50
             )
         return True
 
