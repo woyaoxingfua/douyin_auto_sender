@@ -146,15 +146,17 @@ def scroll_friend_list(recognizer, amount=None):
     logging.info(f"⬇️ 在好友列表中心滚动了 {amount} 单位。")
 
 
-def find_friend_with_scrolling(engine, friend_target, max_scrolls=20):
-    logging.info(f"🔍 开始在列表查找好友: {friend_target}")
+def find_friend_with_scrolling(engine, friend_target, max_scrolls=20, mode=None):
+    logging.info(f"🔍 开始在列表查找好友: {friend_target}, 模式={mode or 'default'}")
 
     for i in range(max_scrolls):
         if _is_stop_requested():
             logging.info("⏹ 收到停止请求，中断好友查找")
             return False
+        # 每次查找前保存区域截图（覆盖），便于确认区域和 OCR 状态
+        _save_region_screenshot('friend_list_search', REGION_FRIEND_LIST)
         logging.debug(f"第 {i + 1} 次查找，目标={friend_target}")
-        if engine.click_element(friend_target, confidence=0.75, timeout=3, region=REGION_FRIEND_LIST):
+        if engine.click_element(friend_target, confidence=0.75, timeout=3, region=REGION_FRIEND_LIST, mode=mode):
             logging.debug(f"找到并点击好友: {friend_target}")
             return True
 
@@ -242,15 +244,15 @@ def _locate_friend(recognizer, friend):
     avatar_text = friend.get('avatar_text', '')
     logging.debug(f"定位好友 {nickname}: avatar_text={avatar_text}, avatar_path={avatar_path}")
 
+    # 1) 优先用 OCR 文字匹配（如"王佳豪"），避免图像匹配把文字当文件名
     if avatar_text:
-        if not find_friend_with_scrolling(recognizer, avatar_text):
-            logging.warning(f"⚠️ 跳过：无法在列表中找到好友 {nickname}（OCR文字匹配失败）。")
-            return False
-        time.sleep(2)
-        return True
+        if find_friend_with_scrolling(recognizer, avatar_text, mode="ocr"):
+            time.sleep(2)
+            return True
+        logging.warning(f"⚠️ OCR文字匹配失败，尝试头像匹配: {nickname}")
 
+    # 2) fallback 到头像图像匹配
     if avatar_path:
-        # 支持相对路径（如 friend_avatars/xxx.png）
         if os.path.isabs(avatar_path):
             avatar_absolute_path = avatar_path
         else:
@@ -259,13 +261,16 @@ def _locate_friend(recognizer, friend):
         if not os.path.exists(avatar_absolute_path):
             logging.warning(f"⚠️ 跳过：好友 {nickname} 的头像文件不存在: {avatar_path}")
             return False
-        if not find_friend_with_scrolling(recognizer, avatar_absolute_path):
-            logging.warning(f"⚠️ 跳过：无法在列表中找到好友 {nickname}（图像匹配失败）。")
-            return False
-        time.sleep(2)
-        return True
+        if find_friend_with_scrolling(recognizer, avatar_absolute_path, mode="image"):
+            time.sleep(2)
+            return True
+        logging.warning(f"⚠️ 跳过：无法在列表中找到好友 {nickname}（图像匹配失败）。")
+        return False
 
-    logging.warning(f"⚠️ 跳过：好友 {nickname} 未配置头像路径或文字。")
+    if avatar_text:
+        logging.warning(f"⚠️ 跳过：无法在列表中找到好友 {nickname}（OCR文字匹配失败）。")
+    else:
+        logging.warning(f"⚠️ 跳过：好友 {nickname} 未配置头像路径或文字。")
     return False
 
 
