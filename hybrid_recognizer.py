@@ -95,13 +95,14 @@ class HybridRecognizer:
 
     def _ocr_find(self, text, region, confidence):
         try:
+            # 已经按 region 截取好子图，OCR 内部不能再 crop，否则坐标会重复裁剪
             screenshot = pyautogui.screenshot(region=region) if region else pyautogui.screenshot()
-            all_texts = self.ocr_client.recognize_text_with_bbox(screenshot, region=region)
+            all_texts = self.ocr_client.recognize_text_with_bbox(screenshot, region=None)
             words = [item["words"] for item in all_texts]
             logger.debug(f"OCR识别到 {len(words)} 个文本块: {words[:20]!r}")
 
             result = self.ocr_client.find_text_on_screen(
-                screenshot, text, region=region, confidence_threshold=confidence
+                screenshot, text, region=None, confidence_threshold=confidence
             )
             if result:
                 logger.info(f"OCR找到文字 '{text}' 在 {result}")
