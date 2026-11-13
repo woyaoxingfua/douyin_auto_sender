@@ -1,6 +1,6 @@
 # 抖音PC客户端 - 每日天气助手-自动续火花 (增强版)
 
-> **开发动态**：v6.0 正在积极开发中！新版本将采用 PySide6 重构 UI，新增本地 OCR 文字识别、控制图像管理等功能。详见 [feature/ocr-enhancement 分支](https://github.com/woyaoxingfua/douyin_auto_sender/tree/feature/ocr-enhancement)。
+> **开发动态**：v6.0 已在 [feature/ocr-enhancement 分支](https://github.com/woyaoxingfua/douyin_auto_sender/tree/feature/ocr-enhancement)完成开发（master 仍为 v5.1 稳定版）。v6.0 为 DearPyGui 桌面版（替代 PySide6，体积从 100MB+ 降至约 2MB），新增：本地 RapidOCR + 图像混合识别、消息预设库、进程监控、SQLite 发送留痕、屏幕区域可视化框选、Mini 悬浮窗等能力，并附完整测试套件与离线 dry-run 工具。升级说明与完整功能列表见该分支的 README。
 
 本项目是一个经过重构和优化的 Python 桌面UI自动化工具，旨在每日定时向指定的抖音好友发送其所在城市的天气预报。通过结合和风天气API、图形用户界面(GUI)配置工具以及 PyAutoGUI 库，实现高度自动化、稳定可靠的每日任务。
 
