@@ -22,6 +22,35 @@ class HybridRecognizer:
         self._load_config()
 
     def _init_ocr(self):
+        """按配置的 ocr_engine 初始化 OCR 引擎（rapidocr / baidu / none）。
+
+        之前的实现无视配置总是加载 RapidLocalOCR，导致 UI 里选
+        "百度云OCR"/"不使用OCR" 实际不生效。
+        """
+        engine = 'rapidocr'
+        try:
+            engine = (config_store.get('ocr_engine') or 'rapidocr').strip().lower()
+        except Exception:
+            pass
+
+        if engine == 'none':
+            logger.info("OCR 已按配置禁用（仅图像匹配）")
+            self._ocr_enabled = False
+            return
+
+        if engine == 'baidu':
+            try:
+                from ocr_service import BaiduOCR
+                api_key = config_store.get_ocr_api_key()
+                secret_key = config_store.get_ocr_secret_key()
+                if api_key and secret_key:
+                    self.ocr_client = BaiduOCR(api_key, secret_key)
+                    logger.info("百度OCR引擎初始化成功")
+                    return
+                logger.warning("百度OCR缺少 Key/Secret，回退本地RapidOCR")
+            except Exception as e:
+                logger.warning(f"百度OCR初始化失败: {e}，回退本地RapidOCR")
+
         try:
             from ocr_service import RapidLocalOCR
             self.ocr_client = RapidLocalOCR()
@@ -97,17 +126,27 @@ class HybridRecognizer:
         try:
             # 已经按 region 截取好子图，OCR 内部不能再 crop，否则坐标会重复裁剪
             screenshot = pyautogui.screenshot(region=region) if region else pyautogui.screenshot()
-            all_texts = self.ocr_client.recognize_text_with_bbox(screenshot, region=None)
-            words = [item["words"] for item in all_texts]
-            logger.debug(f"OCR识别到 {len(words)} 个文本块: {words[:20]!r}")
+            # BaiduOCR 没有 recognize_text_with_bbox（仅本地 RapidOCR 提供，用于诊断日志）
+            if hasattr(self.ocr_client, "recognize_text_with_bbox"):
+                all_texts = self.ocr_client.recognize_text_with_bbox(screenshot, region=None)
+                words = [item["words"] for item in all_texts]
+                logger.debug(f"OCR识别到 {len(words)} 个文本块: {words[:20]!r}")
+            else:
+                logger.debug("当前OCR引擎不支持文本块诊断输出")
 
             result = self.ocr_client.find_text_on_screen(
                 screenshot, text, region=None, confidence_threshold=confidence
             )
             if result:
+                if region:
+                    # screenshot 是按 region 裁好的子图，OCR 返回的是子图内相对坐标；
+                    # 必须加回区域偏移才是屏幕绝对坐标。
+                    # （pyautogui.locateCenterOnScreen 的图像匹配路径返回的就是绝对坐标，
+                    #  两条路径必须一致，否则 OCR 找到目标后也会点错位置。）
+                    result = (result[0] + region[0], result[1] + region[1])
                 logger.info(f"OCR找到文字 '{text}' 在 {result}")
                 return result
-            logger.debug(f"OCR未找到文字 '{text}'，区域内全部文本: {words[:30]!r}")
+            logger.debug(f"OCR未找到文字 '{text}'")
         except Exception as e:
             logger.debug(f"OCR识别异常: {type(e).__name__}: {e!r}")
         return None

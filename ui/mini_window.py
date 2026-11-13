@@ -58,6 +58,7 @@ class MiniStatusWindow:
         self._ready.set()
         self._root.after(80, self._process_pending)
         self._root.mainloop()
+        self._teardown_tk()
 
     def _build_ui(self):
         frame = tk.Frame(self.window, bg='#1a1a1a', padx=10, pady=8)
@@ -180,6 +181,13 @@ class MiniStatusWindow:
             except tk.TclError:
                 pass
         self._root.after(80, self._process_pending)
+
+    def _teardown_tk(self):
+        """mainloop 退出后清理 Tk 根对象，避免残留。"""
+        try:
+            self._root.destroy()
+        except Exception:
+            pass
 
     def _do_update(self, data):
         self.status_label.config(text=data['status'], fg=data['status_color'] or '#4caf50')

@@ -6,8 +6,19 @@
 # Python cache
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Local configuration and data (IMPORTANT for privacy)
 config.json
 run.log
+run.log.*
 friend_avatars/
+send_log.db
+messages.json
+
+# Runtime debug artifacts (screenshots saved during runs)
+last_*.png
+control_images/preview_*.png
+
+# Other tooling
+.mimocode/

@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import logging
 
 from config_utils import project_path, load_config
@@ -11,24 +12,48 @@ MESSAGES_FILE = project_path('messages.json')
 DEFAULT_PRESETS = [
     {
         "id": "weather",
-        "name": "天气预报",
+        "name": "天气预报（默认）",
         "use_weather_api": True,
-        "template": "Hi {nickname}，你所在的{city_name}今天白天{text_day}，晚上{text_night}。\n气温是{temp_min}到{temp_max}℃，{wind_dir}{wind_scale}级。",
+        "template": (
+            "Hi {nickname}，你所在的{city_name}今天白天{text_day}，晚上{text_night}。\n"
+            "气温是{temp_min}到{temp_max}℃，{wind_dir}{wind_scale}级。"
+        ),
         "variables": ["nickname", "city_name", "text_day", "text_night", "temp_min", "temp_max", "wind_dir", "wind_scale"],
     },
     {
         "id": "good_morning",
         "name": "早安问候",
         "use_weather_api": False,
-        "template": "早上好 {nickname}！祝你今天工作顺利，心情愉快！",
+        "template": "早上好 {nickname}！\n新的一天开始了，记得吃早餐、多喝水，元气满满地出门吧 ☀️",
         "variables": ["nickname"],
     },
     {
         "id": "good_night",
         "name": "晚安问候",
         "use_weather_api": False,
-        "template": "晚安 {nickname}！好梦相伴，明天见！",
+        "template": "晚安 {nickname}！\n今天辛苦啦，好梦相伴，明天又是新开始 🌙",
         "variables": ["nickname"],
+    },
+    {
+        "id": "reminder",
+        "name": "通用提醒",
+        "use_weather_api": False,
+        "template": "{nickname}，提醒一下：{custom_text}",
+        "variables": ["nickname", "custom_text"],
+    },
+    {
+        "id": "birthday",
+        "name": "生日祝福",
+        "use_weather_api": False,
+        "template": "🎂 生日快乐 {nickname}！\n愿你眼里有光、心中有爱，往后每一天都甜甜蜜蜜~",
+        "variables": ["nickname"],
+    },
+    {
+        "id": "plain",
+        "name": "纯文本（无变量）",
+        "use_weather_api": False,
+        "template": "这是一条纯文本消息，不带任何变量。",
+        "variables": [],
     },
 ]
 
@@ -151,5 +176,12 @@ class MessageManager:
             logger.error(f"导出预设失败: {e}")
             return False
 
+    def load_all(self):
+        """返回 {presets, active_preset} 字典"""
+        return {"presets": self.presets, "active_preset": self.active_preset_id}
 
-import time
+    def save_all(self, presets, active_preset_id):
+        """保存预设和激活ID"""
+        self.presets = presets
+        self.active_preset_id = active_preset_id
+        self._save()

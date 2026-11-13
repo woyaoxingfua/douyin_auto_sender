@@ -83,6 +83,8 @@ def normalize_friend(raw_friend: Dict) -> Dict:
         "nickname": nickname,
         "city_name": city_name,
         "location_id": location_id,
+        # 保留旧版 city 字段，确保从 v6.0 切回 master 仍可读取
+        "city": location_id,
         "avatar_image": avatar_image,
         "avatar_text": avatar_text,
     }
@@ -96,14 +98,67 @@ def validate_runtime_config(config: Dict) -> List[str]:
         errors.append("缺少 api_key（可在 config.json 或环境变量 DOUYIN_WEATHER_API_KEY 提供）")
     if not config.get("friends"):
         errors.append("好友列表为空")
-    
+
     has_any_recognition = False
     for friend in config.get("friends", []):
         if friend.get("avatar_image") or friend.get("avatar_text"):
             has_any_recognition = True
             break
-    
+
     if config.get("friends") and not has_any_recognition:
         errors.append("所有好友都未配置识别方式（头像截图或OCR文字）")
-    
+
     return errors
+
+
+# 常用城市 location_id（和风天气）速查
+COMMON_CITIES = [
+    ("北京", "101010100"),
+    ("上海", "101020100"),
+    ("广州", "101280101"),
+    ("深圳", "101280601"),
+    ("杭州", "101210101"),
+    ("南京", "101190101"),
+    ("苏州", "101190401"),
+    ("成都", "101270101"),
+    ("重庆", "101040100"),
+    ("武汉", "101200101"),
+    ("西安", "101110101"),
+    ("天津", "101030100"),
+    ("青岛", "101120201"),
+    ("厦门", "101230201"),
+    ("长沙", "101250101"),
+    ("郑州", "101180101"),
+    ("济南", "101120101"),
+    ("沈阳", "101070101"),
+    ("大连", "101070201"),
+    ("哈尔滨", "101050101"),
+    ("昆明", "101290101"),
+    ("三亚", "101310201"),
+    ("拉萨", "101140101"),
+    ("乌鲁木齐", "101130101"),
+    ("兰州", "101160101"),
+]
+
+
+def search_city_by_name(name: str) -> list:
+    """在城市速查表中搜索（用户输入后可下拉选择）"""
+    if not name:
+        return COMMON_CITIES[:10]
+    name = name.strip().lower()
+    results = [(c, cid) for c, cid in COMMON_CITIES if name in c]
+    return results[:20]
+
+
+def create_default_friend_template(nickname: str = "示例好友", city_name: str = "北京") -> Dict:
+    """生成一个开箱即用的好友模板"""
+    location_id = next((cid for c, cid in COMMON_CITIES if c == city_name), "101010100")
+    return {
+        "nickname": nickname,
+        "city_name": city_name,
+        "location_id": location_id,
+        # 保留旧版 city 字段，确保从 v6.0 切回 master 仍可读取
+        "city": location_id,
+        "avatar_image": "",
+        "avatar_text": "",
+    }

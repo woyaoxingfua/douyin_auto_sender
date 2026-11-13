@@ -377,6 +377,29 @@ def get_douyin_screenshot_rect() -> Optional[tuple]:
     return None
 
 
+def screen_rect_to_window_pct(x, y, w, h, window_rect) -> Dict:
+    """把屏幕绝对坐标区域换算成「抖音窗口相对百分比」。
+
+    douyin_bot._get_ui_regions 里的 ui_regions 百分比是相对抖音窗口的
+    （x = 窗口x + x_pct * 窗口宽），而 region_selector 框选返回的是屏幕
+    绝对坐标。两个坐标系不一致会导致框选出来的区域整体偏移，
+    这里做一次统一换算。
+    """
+    dx, dy, dw, dh = window_rect
+    if dw <= 0 or dh <= 0:
+        return {'x_pct': 0.0, 'y_pct': 0.0, 'w_pct': 0.0, 'h_pct': 0.0}
+
+    def _clamp01(v):
+        return max(0.0, min(1.0, v))
+
+    return {
+        'x_pct': round(_clamp01((x - dx) / dw), 4),
+        'y_pct': round(_clamp01((y - dy) / dh), 4),
+        'w_pct': round(min(1.0, w / dw), 4),
+        'h_pct': round(min(1.0, h / dh), 4),
+    }
+
+
 def is_douyin_foreground() -> bool:
     """抖音窗口是否在前台（focused）"""
     fg = GetForegroundWindow()

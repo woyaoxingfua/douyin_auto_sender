@@ -10,6 +10,26 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def normalize_for_match(text: str) -> str:
+    """OCR 文本匹配前的归一化：去空白、全角转半角、转小写。
+
+    RapidOCR 常在中文之间插入空格（如 '王 佳 豪'），或把冒号识别成全角 '：'，
+    直接 substring 匹配会漏。两边都归一化后再比较。
+    """
+    if not text:
+        return ""
+    text = str(text)
+    out = []
+    for ch in text:
+        code = ord(ch)
+        if code == 0x3000:  # 全角空格
+            continue
+        if 0xFF01 <= code <= 0xFF5E:  # 全角 ASCII 区
+            ch = chr(code - 0xFEE0)
+        out.append(ch)
+    return "".join(out).replace(" ", "").replace("\t", "").replace("\n", "").lower()
+
+
 class RapidLocalOCR:
     """本地OCR引擎，基于PaddleOCR的RapidOCR，支持文字检测和边界提取，无需网络"""
 
@@ -101,8 +121,10 @@ class RapidLocalOCR:
     ) -> Optional[Tuple[int, int]]:
         results = self.recognize_text_with_bbox(screenshot, region)
 
+        norm_target = normalize_for_match(target_text)
         for item in results:
-            if target_text.lower() in item["words"].lower() and item["confidence"] >= confidence_threshold:
+            if (norm_target in normalize_for_match(item["words"])
+                    and item["confidence"] >= confidence_threshold):
                 return item["center"]
 
         return None

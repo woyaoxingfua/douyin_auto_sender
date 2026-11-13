@@ -38,7 +38,7 @@ from send_log import (
 from message_manager import MessageManager, DEFAULT_PRESETS
 from douyin_monitor import (
     is_douyin_running, get_douyin_info, get_douyin_screenshot_rect,
-    is_douyin_foreground,
+    is_douyin_foreground, screen_rect_to_window_pct,
 )
 from font_loader import setup_chinese_fonts, get_font, bind_to_item
 from region_selector import select_region, capture_screen_to_file, crop_image_to_file, get_screen_origin
@@ -1337,8 +1337,8 @@ class DPGApp:
     def _build_region_config(self):
         dpg.add_text("屏幕区域", color=C_AMBER)
         dpg.add_text("点击「框选」按钮，从屏幕上拖拽框出对应区域。", color=C_TEXT_DIM)
-        dpg.add_text("百分比会按当前屏幕分辨率自动换算，下次分辨率变了也会跟着变。",
-                     color=C_TEXT_DIM, wrap=520)
+        dpg.add_text("百分比为抖音窗口相对值（检测到抖音窗口时自动换算）；"
+                     "抖音窗口位置/大小变了也会自动跟随。", color=C_TEXT_DIM, wrap=520)
         dpg.add_separator()
         cfg = config_store.get()
         regions = cfg.get('ui_regions', {
@@ -1450,6 +1450,20 @@ class DPGApp:
         regions = cfg.get('ui_regions', {})
         scale_x = disp_w / screen_w
         scale_y = disp_h / screen_h
+
+        # ui_regions 的百分比是相对抖音窗口的（与 douyin_bot._get_ui_regions 一致），
+        # 画之前先换算回屏幕绝对坐标；抖音没开时退回全屏百分比模式
+        win_rect = get_douyin_screenshot_rect()
+        if win_rect:
+            dx, dy, dw, dh = win_rect
+            wx, wy = dx * scale_x, dy * scale_y
+            ww, wh = dw * scale_x, dh * scale_y
+            dpg.draw_rectangle((wx, wy), (wx + ww, wy + wh),
+                               color=(255, 255, 255, 160), thickness=1,
+                               parent=self.tag('region_drawlist'))
+            dpg.draw_text((wx + 4, wy + 4), "抖音窗口", color=(255, 255, 255, 200),
+                          parent=self.tag('region_drawlist'))
+
         colors = {
             'top_bar': (245, 158, 11, 200),
             'friend_list': (96, 165, 250, 200),
@@ -1460,10 +1474,17 @@ class DPGApp:
             r = regions.get(key)
             if not r:
                 continue
-            x = r['x_pct'] * screen_w * scale_x
-            y = r['y_pct'] * screen_h * scale_y
-            w = r['w_pct'] * screen_w * scale_x
-            h = r['h_pct'] * screen_h * scale_y
+            if win_rect:
+                dx, dy, dw, dh = win_rect
+                x = (dx + r['x_pct'] * dw) * scale_x
+                y = (dy + r['y_pct'] * dh) * scale_y
+                w = r['w_pct'] * dw * scale_x
+                h = r['h_pct'] * dh * scale_y
+            else:
+                x = r['x_pct'] * screen_w * scale_x
+                y = r['y_pct'] * screen_h * scale_y
+                w = r['w_pct'] * screen_w * scale_x
+                h = r['h_pct'] * screen_h * scale_y
             dpg.draw_rectangle((x, y), (x + w, y + h),
                                color=color, thickness=2,
                                parent=self.tag('region_drawlist'))
@@ -1471,27 +1492,36 @@ class DPGApp:
                           parent=self.tag('region_drawlist'))
 
     def _pick_region_for(self, key):
-        """用全屏框选器选一个区域，写到对应 key"""
+        """用全屏框选器选一个区域，写到对应 key。
+
+        框选器返回的是屏幕绝对坐标 / 全屏百分比，而配置里的百分比是
+        相对抖音窗口的，这里检测到抖音窗口时做一次换算，否则框出来的
+        区域在实际执行时会整体偏移。
+        """
         result = select_region()
         if not result:
             return
+        win_rect = get_douyin_screenshot_rect()
+        if win_rect:
+            pct = screen_rect_to_window_pct(result['x'], result['y'],
+                                            result['w'], result['h'], win_rect)
+        else:
+            # 抖音未运行：bot 侧会退化为全屏百分比模式，这里保持一致
+            pct = {'x_pct': result['x_pct'], 'y_pct': result['y_pct'],
+                   'w_pct': result['w_pct'], 'h_pct': result['h_pct']}
         cfg = config_store.get()
         regions = cfg.get('ui_regions', {})
-        regions[key] = {
-            'x_pct': result['x_pct'],
-            'y_pct': result['y_pct'],
-            'w_pct': result['w_pct'],
-            'h_pct': result['h_pct'],
-        }
+        regions[key] = pct
         cfg['ui_regions'] = regions
         config_store.save(cfg)
         # 刷新input
-        dpg.set_value(self.region_widgets[f"{key}_x"], f"{result['x_pct']:.3f}")
-        dpg.set_value(self.region_widgets[f"{key}_y"], f"{result['y_pct']:.3f}")
-        dpg.set_value(self.region_widgets[f"{key}_w"], f"{result['w_pct']:.3f}")
-        dpg.set_value(self.region_widgets[f"{key}_h"], f"{result['h_pct']:.3f}")
+        dpg.set_value(self.region_widgets[f"{key}_x"], f"{pct['x_pct']:.3f}")
+        dpg.set_value(self.region_widgets[f"{key}_y"], f"{pct['y_pct']:.3f}")
+        dpg.set_value(self.region_widgets[f"{key}_w"], f"{pct['w_pct']:.3f}")
+        dpg.set_value(self.region_widgets[f"{key}_h"], f"{pct['h_pct']:.3f}")
         self._refresh_region_preview()
-        self._show_toast(f"已更新 {key}")
+        where = "抖音窗口" if win_rect else "全屏（未检测到抖音窗口）"
+        self._show_toast(f"已更新 {key}（{where}百分比）")
 
     def _save_regions(self, sender=None, app_data=None):
         try:
@@ -1802,14 +1832,40 @@ class DPGApp:
             multiline=True, readonly=True, width=-1, height=160))
         self._refresh_scheduler_stats()
 
+    @staticmethod
+    def _normalize_schedule_time(raw):
+        """把用户输入的时间规范化为 HH:MM（零填充）。
+
+        "8:00" 不规范化的话永远匹配不上 strftime('%H:%M') 生成的 "08:00"，
+        调度会静默失效。非法输入返回 None。
+        """
+        raw = (raw or '').strip()
+        if not raw:
+            return '08:00'
+        try:
+            parts = raw.split(':')
+            if len(parts) != 2:
+                return None
+            hh, mm = int(parts[0]), int(parts[1])
+            if not (0 <= hh <= 23 and 0 <= mm <= 59):
+                return None
+            return f"{hh:02d}:{mm:02d}"
+        except ValueError:
+            return None
+
     def _save_scheduler(self, sender=None, app_data=None):
         try:
+            sched_time = self._normalize_schedule_time(dpg.get_value(self.tag('sched_time')))
+            if sched_time is None:
+                self._show_toast("时间格式应为 HH:MM，如 08:00")
+                return
             cfg = config_store.get()
             cfg['scheduler_enabled'] = bool(dpg.get_value(self.tag('sched_enabled')))
-            cfg['schedule_time'] = dpg.get_value(self.tag('sched_time')).strip() or '08:00'
+            cfg['schedule_time'] = sched_time
             config_store.save(cfg)
             self.scheduler_enabled = cfg['scheduler_enabled']
-            self.scheduled_time = cfg['schedule_time']
+            self.scheduled_time = sched_time
+            dpg.set_value(self.tag('sched_time'), sched_time)
             self._show_toast("已保存")
         except Exception as e:
             self._show_toast(f"失败: {e}")
@@ -1976,6 +2032,19 @@ class DPGApp:
             self.logger.info("没有正在运行的任务")
             self._show_toast("没有正在运行的任务")
 
+    def _on_task_progress(self, stage=None, friend=None, index=None, total=None,
+                          seconds_left=None, success=None, failed=None, skipped=None):
+        """douyin_bot 的进度回调：更新 Mini 悬浮窗的当前好友/倒计时显示。"""
+        if friend is not None:
+            self._current_friend = friend
+        if seconds_left is not None:
+            self._next_run_countdown = f"{seconds_left}s"
+        if stage == 'done':
+            self._current_friend = "-"
+            self._next_run_countdown = (self.scheduled_time
+                                        if self.scheduler_enabled else "调度已禁用")
+        self._update_mini_window()
+
     def _run_task_thread(self):
         self._task_running = True
         self._stop_flag.clear()
@@ -1984,8 +2053,9 @@ class DPGApp:
             with _dpg_locked():
                 dpg.set_value(self.tag('status_text'), "▶ 任务执行中...")
             self.logger.info("▶ 开始执行自动化任务")
-            from douyin_bot import run_bot_task, set_stop_flag
+            from douyin_bot import run_bot_task, set_stop_flag, set_progress_callback
             set_stop_flag(self._stop_flag)
+            set_progress_callback(self._on_task_progress)
             run_bot_task()
             if self._stop_flag.is_set():
                 with _dpg_locked():
@@ -2001,8 +2071,12 @@ class DPGApp:
             self.logger.error(f"任务失败: {e}")
         finally:
             self._task_running = False
+            self._current_friend = "-"
+            self._next_run_countdown = (self.scheduled_time
+                                        if self.scheduler_enabled else "调度已禁用")
             self._update_mini_window()
         self._refresh_send_history()
+        self._refresh_dashboard()
 
     def _test_all_connections(self, sender=None, app_data=None):
         self._test_qweather()
@@ -2012,67 +2086,87 @@ class DPGApp:
 
     def _refresh_dashboard(self, sender=None, app_data=None):
         stats = get_today_stats()
-        dpg.set_value(self.tag('big_today'), str(stats['success']))
-        dpg.set_value(self.tag('dash_today_detail'),
-                      f"成功 {stats['success']}  ·  失败 {stats['failed']}  ·  共 {stats['total']}")
-
         info = get_douyin_info()
-        if info:
-            dpg.set_value(self.tag('big_douyin'), "运行中" if info else "—")
-            dpg.configure_item(self.tag('big_douyin'), color=C_GREEN if info else C_RED)
-            if info.get('window'):
-                w = info['window']
-                dpg.set_value(self.tag('dash_douyin_pos'), f"位置: {w['x']}, {w['y']}")
-                dpg.set_value(self.tag('dash_douyin_size'), f"尺寸: {w['w']} x {w['h']}")
-                fg = is_douyin_foreground()
-                dpg.set_value(self.tag('dash_douyin_fg'),
-                              f"前台: {'是' if fg else '否'}  ·  标题: {w['title'][:30]}")
+
+        # 既会被 UI 回调（主线程）调用，也会被任务工作线程调用，统一加锁
+        with _dpg_locked():
+            if dpg.does_item_exist(self.tag('big_today')):
+                dpg.set_value(self.tag('big_today'), str(stats['success']))
+                dpg.set_value(self.tag('dash_today_detail'),
+                              f"成功 {stats['success']}  ·  失败 {stats['failed']}  ·  共 {stats['total']}")
+
+            if info:
+                if dpg.does_item_exist(self.tag('big_douyin')):
+                    dpg.set_value(self.tag('big_douyin'), "运行中")
+                    dpg.configure_item(self.tag('big_douyin'), color=C_GREEN)
+                if info.get('window'):
+                    w = info['window']
+                    dpg.set_value(self.tag('dash_douyin_pos'), f"位置: {w['x']}, {w['y']}")
+                    dpg.set_value(self.tag('dash_douyin_size'), f"尺寸: {w['w']} x {w['h']}")
+                    fg = is_douyin_foreground()
+                    dpg.set_value(self.tag('dash_douyin_fg'),
+                                  f"前台: {'是' if fg else '否'}  ·  标题: {w['title'][:30]}")
+                else:
+                    dpg.set_value(self.tag('dash_douyin_pos'), "位置: — (窗口未找到)")
+                    dpg.set_value(self.tag('dash_douyin_size'), "尺寸: —")
+                    dpg.set_value(self.tag('dash_douyin_fg'), "前台: —")
             else:
-                dpg.set_value(self.tag('dash_douyin_pos'), "位置: — (窗口未找到)")
+                if dpg.does_item_exist(self.tag('big_douyin')):
+                    dpg.set_value(self.tag('big_douyin'), "未运行")
+                    dpg.configure_item(self.tag('big_douyin'), color=C_TEXT_DIM)
+                dpg.set_value(self.tag('dash_douyin_pos'), "位置: —")
                 dpg.set_value(self.tag('dash_douyin_size'), "尺寸: —")
                 dpg.set_value(self.tag('dash_douyin_fg'), "前台: —")
-        else:
-            dpg.set_value(self.tag('big_douyin'), "未运行")
-            dpg.configure_item(self.tag('big_douyin'), color=C_TEXT_DIM)
-            dpg.set_value(self.tag('dash_douyin_pos'), "位置: —")
-            dpg.set_value(self.tag('dash_douyin_size'), "尺寸: —")
-            dpg.set_value(self.tag('dash_douyin_fg'), "前台: —")
 
-        dpg.set_value(self.tag('big_schedule'), self.scheduled_time)
-        dpg.set_value(self.tag('dash_schedule_status'),
-                      "已启用" if self.scheduler_enabled else "已禁用")
-        dpg.configure_item(self.tag('dash_schedule_status'),
-                           color=C_GREEN if self.scheduler_enabled else C_TEXT_DIM)
+            if dpg.does_item_exist(self.tag('big_schedule')):
+                dpg.set_value(self.tag('big_schedule'), self.scheduled_time)
+                dpg.set_value(self.tag('dash_schedule_status'),
+                              "已启用" if self.scheduler_enabled else "已禁用")
+                dpg.configure_item(self.tag('dash_schedule_status'),
+                                   color=C_GREEN if self.scheduler_enabled else C_TEXT_DIM)
 
     # ─── 后台线程 ───
 
     def _start_background_tasks(self):
         def update():
+            # 抖音探测（枚举全部进程+窗口）开销大，降到每 2.5 秒一次；
+            # Mini 窗停止/恢复请求和调度检查保持 0.2 秒粒度快速响应
+            last_probe = 0.0
             while dpg.is_dearpygui_running():
                 try:
-                    # 先在工作线程收集数据（不碰 DPG）
-                    stats = self.process_monitor.get_main_proc_stats()
-                    douyin_info = get_douyin_info()
                     now = datetime.now()
-                    time_str = now.strftime('%Y-%m-%d %H:%M:%S')
 
-                    # 统一在锁内更新 UI
-                    with _dpg_locked():
-                        if dpg.does_item_exist(self.tag('header_proc')):
-                            dpg.set_value(self.tag('header_proc'),
-                                          f"内存: {stats['total_memory_mb']:.0f} MB  "
-                                          f"CPU: {stats['total_cpu_percent']:.1f}%  "
-                                          f"线程: {stats['thread_count']}")
-                        if dpg.does_item_exist(self.tag('header_douyin')):
-                            if douyin_info and douyin_info.get('window'):
-                                dpg.set_value(self.tag('header_douyin'),
-                                              f"抖音: ✓ ({douyin_info['window']['w']}x{douyin_info['window']['h']})")
-                                dpg.configure_item(self.tag('header_douyin'), color=C_GREEN)
-                            else:
-                                dpg.set_value(self.tag('header_douyin'), "抖音: ✗")
-                                dpg.configure_item(self.tag('header_douyin'), color=C_TEXT_DIM)
-                        if dpg.does_item_exist(self.tag('time_text')):
-                            dpg.set_value(self.tag('time_text'), time_str)
+                    if time.monotonic() - last_probe >= 2.5:
+                        last_probe = time.monotonic()
+                        # 先在工作线程收集数据（不碰 DPG）
+                        stats = self.process_monitor.get_main_proc_stats()
+                        douyin_info = get_douyin_info()
+                        today_stats = get_today_stats()
+
+                        # 统一在锁内更新 UI
+                        with _dpg_locked():
+                            if dpg.does_item_exist(self.tag('header_proc')):
+                                dpg.set_value(self.tag('header_proc'),
+                                              f"内存: {stats['total_memory_mb']:.0f} MB  "
+                                              f"CPU: {stats['total_cpu_percent']:.1f}%  "
+                                              f"线程: {stats['thread_count']}")
+                            if dpg.does_item_exist(self.tag('header_douyin')):
+                                if douyin_info and douyin_info.get('window'):
+                                    dpg.set_value(self.tag('header_douyin'),
+                                                  f"抖音: ✓ ({douyin_info['window']['w']}x{douyin_info['window']['h']})")
+                                    dpg.configure_item(self.tag('header_douyin'), color=C_GREEN)
+                                else:
+                                    dpg.set_value(self.tag('header_douyin'), "抖音: ✗")
+                                    dpg.configure_item(self.tag('header_douyin'), color=C_TEXT_DIM)
+                            if dpg.does_item_exist(self.tag('time_text')):
+                                dpg.set_value(self.tag('time_text'),
+                                              now.strftime('%Y-%m-%d %H:%M:%S'))
+
+                        # Mini 悬浮窗的数据源
+                        self._today_send_count = today_stats.get('success', 0)
+                        if not self._task_running:
+                            self._next_run_countdown = (self.scheduled_time
+                                                        if self.scheduler_enabled else "调度已禁用")
 
                     # 调度检查（不碰 DPG，安全）
                     today = now.strftime('%Y-%m-%d')
@@ -2082,22 +2176,14 @@ class DPGApp:
                         self.logger.info(f"⏰ 到达调度时间 {self.scheduled_time}, 自动执行")
                         self._run_task_now()
 
-                    # 刷新 Mini 悬浮窗数据
+                    # Mini 悬浮窗：状态刷新 + 停止/恢复请求（0.2s 粒度）
                     if self.mini_window:
                         try:
-                            stats = get_today_stats()
-                            self._today_send_count = stats.get('success', 0)
-                            if self.scheduler_enabled:
-                                self._next_run_countdown = f"{self.scheduled_time}"
-                            else:
-                                self._next_run_countdown = "调度已禁用"
                             self._update_mini_window()
-                            # 检查 Mini 窗停止请求
                             if self.mini_window.stop_requested.is_set():
                                 self.mini_window.stop_requested.clear()
                                 self.logger.info("收到 Mini 窗停止请求")
                                 self._stop_task()
-                            # 检查 Mini 窗恢复请求
                             if self.mini_window.restore_requested.is_set():
                                 self.mini_window.restore_requested.clear()
                                 self.logger.info("收到 Mini 窗恢复请求")
@@ -2115,10 +2201,16 @@ class DPGApp:
     def _load_scheduler_config(self):
         try:
             cfg = config_store.get()
-            self.scheduled_time = cfg.get('schedule_time', '08:00')
+            sched_time = self._normalize_schedule_time(cfg.get('schedule_time', '08:00'))
+            if sched_time is None:
+                logging.getLogger(__name__).warning(
+                    f"配置里的调度时间 {cfg.get('schedule_time')!r} 不合法，回退 08:00")
+                sched_time = '08:00'
+            self.scheduled_time = sched_time
             self.scheduler_enabled = cfg.get('scheduler_enabled', True)
         except Exception:
-            pass
+            self.scheduled_time = '08:00'
+            self.scheduler_enabled = True
 
     # ─── 通用 UI 助手 ───
 

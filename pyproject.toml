@@ -1,0 +1,70 @@
+[tool.poetry]
+name = "douyin-auto-sender"
+version = "6.0.0"
+description = "抖音自动私信发送工具"
+authors = ["douyin-auto-sender"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+dearpygui = "^1.10"
+pyautogui = "^0.9.54"
+pyperclip = "^1.8.2"
+psutil = "^5.9.8"
+schedule = "^1.2.0"
+requests = "^2.31.0"
+rapidocr-onnxruntime = "^1.3.0"
+pillow = "^10.1.0"
+pywin32 = "^306"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-mock = "^3.11.0"
+black = "^23.10.0"
+isort = "^5.12.0"
+flake8 = "^6.1.0"
+pre-commit = "^3.6.0"
+mypy = "^1.7.0"
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_output = 3
+include_trailing_comma = true
+force_alphabetical_sort = true
+force_sort_within_sections = true
+
+[tool.flake8]
+max-line-length = 88
+ignore = ["E501"]
+exclude = [".git", "__pycache__", "*.pyc", "*.pyo", ".eggs", "*.egg-info", "_build", "build", "dist"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+ignore_missing_imports = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

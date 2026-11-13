@@ -2,13 +2,27 @@ import sys
 import os
 import signal
 import logging
-import json
+import locale
 from logging.handlers import RotatingFileHandler
+
+# 强制UTF-8（修复DPG输入中文"消息"显示问号）
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+try:
+    locale.setlocale(locale.LC_ALL, 'zh_CN.UTF-8')
+except Exception:
+    try:
+        locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
+    except Exception:
+        pass
 
 import dearpygui.dearpygui as dpg
 
-from config_utils import project_path, load_config
+from config_utils import project_path
+from config_store import config_store
+from font_loader import setup_chinese_fonts, get_font
+from ui.mini_window import MiniStatusWindow
 
+# 先建context再注册字体（顺序很重要）
 dpg.create_context()
 
 
@@ -28,60 +42,52 @@ def setup_logging():
     console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     logger.addHandler(console_handler)
 
+    # 应用配置文件中的日志级别
+    try:
+        config_store.apply_log_level()
+    except Exception as e:
+        logger.warning(f"应用日志级别失败: {e}")
+
     return logger
-
-
-def load_chinese_font():
-    font_paths = [
-        "C:/Windows/Fonts/msyh.ttc",
-        "C:/Windows/Fonts/msyhbd.ttc",
-        "C:/Windows/Fonts/simsun.ttc",
-        "C:/Windows/Fonts/simhei.ttf",
-    ]
-    for path in font_paths:
-        if os.path.exists(path):
-            return path
-    return None
 
 
 def load_window_config():
     try:
-        cfg = load_config()
-        ui_cfg = cfg.get('ui', {})
+        ui_cfg = config_store.get().get('ui', {})
         mode = ui_cfg.get('window_mode', 'normal')
         if mode == 'compact':
             return ui_cfg.get('compact_size', [900, 600])
-        elif mode == 'mini':
-            return ui_cfg.get('mini_size', [500, 400])
-        return [1100, 750]
+        return [1280, 800]
     except Exception:
-        return [1100, 750]
+        return [1280, 800]
 
 
 def main():
     logger = setup_logging()
     logger.info("抖音天气助手 v6.0 启动中...")
 
+    # 字体必须在viewport之前注册
+    setup_chinese_fonts(default_size=16, large_size=24, huge_size=42)
+
     size = load_window_config()
 
-    font_path = load_chinese_font()
-    if font_path:
-        with dpg.font_registry():
-            with dpg.font(font_path, 16) as default_font:
-                pass
-        dpg.bind_font(default_font)
-
     dpg.create_viewport(
-        title="抖音天气助手 v6.0",
+        title="Douyin Weather Assistant v6.0",
         width=size[0],
         height=size[1],
-        min_width=500,
-        min_height=400,
+        min_width=900,
+        min_height=600,
         resizable=True,
     )
 
     from ui.dpg_app import DPGApp
-    app = DPGApp(logger)
+    try:
+        mini_window = MiniStatusWindow()
+    except Exception as e:
+        # tkinter 不可用等情况不应导致主程序无法启动
+        logger.warning(f"Mini 悬浮窗不可用: {e}")
+        mini_window = None
+    app = DPGApp(logger, mini_window=mini_window)
     app.build()
 
     dpg.setup_dearpygui()

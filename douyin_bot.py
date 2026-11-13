@@ -15,7 +15,7 @@ from config_store import config_store
 from hybrid_recognizer import HybridRecognizer
 from message_manager import MessageManager
 from send_log import log_send
-from douyin_monitor import is_douyin_running, wait_for_douyin
+from douyin_monitor import is_douyin_window_ready
 
 pyautogui.PAUSE = 0.5
 pyautogui.FAILSAFE = True
@@ -25,11 +25,29 @@ SCREEN_WIDTH, SCREEN_HEIGHT = pyautogui.size()
 # 停止标志（由外部 UI 设置，任务循环在每个好友前检查）
 _stop_flag = None
 
+# 进度回调（由外部 UI 设置：Mini 悬浮窗等需要实时知道当前好友/倒计时）
+# 回调签名：cb(stage=..., friend=..., index=..., total=..., seconds_left=...)
+_progress_callback = None
+
 
 def set_stop_flag(flag: threading.Event):
     """设置停止标志，run_bot_task 会在每个好友处理前检查。"""
     global _stop_flag
     _stop_flag = flag
+
+
+def set_progress_callback(callback):
+    """设置进度回调（线程安全：回调里自行处理跨线程更新）。"""
+    global _progress_callback
+    _progress_callback = callback
+
+
+def _report_progress(**kwargs):
+    if _progress_callback is not None:
+        try:
+            _progress_callback(**kwargs)
+        except Exception as e:
+            logging.debug(f"进度回调异常: {e}")
 
 
 def _is_stop_requested() -> bool:
@@ -146,8 +164,23 @@ def scroll_friend_list(recognizer, amount=None):
     logging.info(f"⬇️ 在好友列表中心滚动了 {amount} 单位。")
 
 
+def scroll_friend_list_to_top(recognizer, rounds=2):
+    """把好友列表滚回顶部。
+
+    上一个好友查找会把列表滚到中/底部；不回顶的话，排在列表上方的好友
+    永远滚不到（查找只会向下滚），多好友连续发送时会全部失败。
+    """
+    for _ in range(rounds):
+        if _is_stop_requested():
+            return
+        recognizer.scroll_at(region=REGION_FRIEND_LIST, amount=20)
+        time.sleep(0.3)
+    logging.debug("已将好友列表滚回顶部")
+
+
 def find_friend_with_scrolling(engine, friend_target, max_scrolls=20, mode=None):
     logging.info(f"🔍 开始在列表查找好友: {friend_target}, 模式={mode or 'default'}")
+    scroll_friend_list_to_top(engine)
 
     for i in range(max_scrolls):
         if _is_stop_requested():
@@ -199,14 +232,25 @@ def _load_runtime_config():
         return None
 
 
-def _ensure_douyin_ready():
-    if is_douyin_running():
+def _ensure_douyin_ready(timeout=120):
+    """等待抖音窗口就绪（进程在跑但窗口没好时区域计算会退化为全屏百分比）。
+
+    等待期间每 2 秒响应一次停止请求，避免用户点了停止还要干等 120 秒。
+    """
+    if is_douyin_window_ready():
         return True
-    logging.info("⏳ 等待抖音启动... (请打开抖音 PC 客户端)")
-    if not wait_for_douyin(timeout=120):
-        logging.error("❌ 等待抖音启动超时（120秒），任务取消")
-        return False
-    return True
+    logging.info(f"⏳ 等待抖音启动... (请打开抖音 PC 客户端，最多 {timeout} 秒)")
+    start = time.time()
+    while time.time() - start < timeout:
+        if _is_stop_requested():
+            logging.info("⏹ 等待抖音启动期间收到停止请求，任务取消")
+            return False
+        if is_douyin_window_ready():
+            logging.info("检测到抖音窗口已就绪")
+            return True
+        time.sleep(2)
+    logging.error(f"❌ 等待抖音启动超时（{timeout}秒），任务取消")
+    return False
 
 
 def _prepare_runtime():
@@ -385,6 +429,7 @@ def _send_and_finalize(recognizer, nickname, message):
         _exit_session(recognizer)
     else:
         logging.warning(f"❌ 发送失败 -> {nickname}")
+    return success
 
 
 def _exit_session(recognizer):
@@ -403,29 +448,46 @@ def _exit_session(recognizer):
         logging.debug(f"OCR 模式退出会话结果: {success}")
 
     if not success:
-        logging.warning('⚠️ 未能点击"退出会话"按钮，尝试手动退出')
-        pyautogui.hotkey('alt', 'f4')
-        time.sleep(1)
+        # 注意：这里不能用 alt+f4 —— 它会把整个抖音客户端关掉，
+        # 后面的好友就全没法发了。Esc 通常足以关闭当前聊天会话。
+        logging.warning('⚠️ 未能点击"退出会话"按钮，按 Esc 尝试关闭当前会话')
+        pyautogui.press('esc')
+        time.sleep(0.5)
 
 
 def _process_friend(recognizer, friend, api_host, api_key, msg_manager, active_preset):
+    """处理单个好友。
+
+    返回值：
+      'fatal'   —— 无法进入好友列表等致命错误，调用方应终止整个任务
+      'skipped' —— 好友未配置识别方式 / 列表中找不到 / 消息生成为空
+      'sent'    —— 消息已发送
+      'failed'  —— 找到好友但发送失败，或处理过程异常
+    """
     nickname = friend['nickname']
     logging.debug(f"好友详情: {friend}")
 
+    # 无识别方式的好友在进好友列表之前就跳过，省一次"消息"入口点击
+    if not friend.get('avatar_text') and not friend.get('avatar_image'):
+        logging.warning(f"⚠️ 跳过：好友 {nickname} 未配置头像路径或文字。")
+        return 'skipped'
+
     try:
         if not _enter_friend_list(recognizer):
-            return False
+            return 'fatal'
 
         if not _locate_friend(recognizer, friend):
-            return True
+            return 'skipped'
 
         message = _build_message(msg_manager, active_preset, friend, api_host, api_key)
         logging.debug(f"生成消息: {message[:80]}..." if message and len(message) > 80 else f"生成消息: {message}")
-        if message:
-            _send_and_finalize(recognizer, nickname, message)
+        if not message:
+            logging.warning(f"⚠️ 跳过 {nickname}：消息生成为空（天气接口失败或模板问题）")
+            return 'skipped'
 
+        sent = _send_and_finalize(recognizer, nickname, message)
         time.sleep(3)
-        return True
+        return 'sent' if sent else 'failed'
 
     except Exception as e:
         logging.error(f"处理好友 {nickname} 时发生异常: {e}", exc_info=True)
@@ -437,13 +499,14 @@ def _process_friend(recognizer, friend, api_host, api_key, msg_manager, active_p
             duration_ms=0,
         )
         time.sleep(3)
-        return True
+        return 'failed'
 
 
-def run_bot_task():
+def run_bot_task(only_friend=None):
     logging.info("🚀 --- 开始执行自动化任务 ---")
 
     if not _ensure_douyin_ready():
+        _report_progress(stage='done')
         return
 
     # 抖音窗口就绪后，基于其实际位置重新计算 UI 区域
@@ -453,12 +516,21 @@ def run_bot_task():
 
     runtime = _prepare_runtime()
     if runtime is None:
+        _report_progress(stage='done')
         return
     config, recognizer, msg_manager, active_preset = runtime
 
     api_host = config['api_host']
     api_key = config['api_key']
     friends_list = config['friends']
+
+    # 命令行 --friend：只处理指定昵称的好友
+    if only_friend:
+        friends_list = [f for f in friends_list if f.get('nickname') == only_friend]
+        if not friends_list:
+            logging.error(f"❌ 配置中找不到昵称为 {only_friend!r} 的好友")
+            _report_progress(stage='done')
+            return
 
     logging.info(f"识别模式: {'OCR+图像混合' if recognizer.ocr_client else '图像识别'}")
     logging.info(f"私信入口模式: {config_store.get_enter_private_msg_mode()}")
@@ -470,7 +542,13 @@ def run_bot_task():
 
     logging.info("=" * 50)
     logging.info("⏳ 请在 10 秒内切换到抖音 PC 客户端窗口...")
-    time.sleep(10)
+    for i in range(10, 0, -1):
+        if _is_stop_requested():
+            logging.info("⏹ 倒计时期间收到停止请求，任务取消")
+            _report_progress(stage='done')
+            return
+        _report_progress(stage='countdown', seconds_left=i)
+        time.sleep(1)
 
     # 保存当前屏幕截图，用于调试 UI 区域是否正确
     try:
@@ -495,26 +573,32 @@ def run_bot_task():
     fail_count = 0
     skip_count = 0
 
-    for friend in friends_list:
+    for index, friend in enumerate(friends_list):
         if _is_stop_requested():
             logging.info("⏹ 检测到停止请求，终止好友循环")
             break
 
-        logging.info(f"👉 ---=> 正在处理: {friend.get('nickname', '?')} <=---")
+        nickname = friend.get('nickname', '?')
+        logging.info(f"👉 ---=> [{index + 1}/{len(friends_list)}] 正在处理: {nickname} <=---")
+        _report_progress(stage='friend', friend=nickname, index=index + 1, total=len(friends_list))
         result = _process_friend(recognizer, friend, api_host, api_key, msg_manager, active_preset)
-        if result is False:
+        if result == 'fatal':
             logging.error("❌ 核心操作失败，终止任务")
+            fail_count += 1
             break
-        elif result is None:
-            skip_count += 1
-        elif result is True:
+        elif result == 'sent':
             success_count += 1
+        elif result == 'skipped':
+            skip_count += 1
+        elif result == 'failed':
+            fail_count += 1
 
     if _is_stop_requested():
         logging.info("⏹ 任务已被用户停止")
     else:
         logging.info("=" * 50)
         logging.info(f"🎉 任务执行完毕。成功: {success_count}, 失败: {fail_count}, 跳过: {skip_count}")
+    _report_progress(stage='done', success=success_count, failed=fail_count, skipped=skip_count)
 
 
 def main():
@@ -526,7 +610,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
     if args.now or args.friend:
-        run_bot_task()
+        run_bot_task(only_friend=args.friend)
     else:
         logging.info("⏰ 程序已启动，等待每日 08:00 调度执行...")
         schedule.every().day.at("08:00").do(run_bot_task)
