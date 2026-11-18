@@ -9,7 +9,7 @@ from datetime import datetime
 
 import pytest
 
-import send_log
+from services import send_log
 
 
 @pytest.fixture

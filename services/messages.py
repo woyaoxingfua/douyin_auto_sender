@@ -3,7 +3,7 @@ import os
 import time
 import logging
 
-from config_utils import project_path, load_config
+from core.config import project_path
 
 logger = logging.getLogger(__name__)
 

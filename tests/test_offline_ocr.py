@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from ocr_service import RapidLocalOCR, normalize_for_match
+from core.ocr import RapidLocalOCR, normalize_for_match
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRIEND_LIST_PNG = os.path.join(PROJECT_ROOT, 'last_friend_list.png')

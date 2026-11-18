@@ -1,4 +1,4 @@
-import weather_service
+from services import weather as weather_service
 
 
 class DummyResponse:

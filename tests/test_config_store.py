@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-from config_store import ConfigStore, config_store
+from core.config import ConfigStore, config_store
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def fresh_store(tmp_path, monkeypatch):
     def fake_project_path(*parts):
         return str(tmp_path.joinpath(*parts))
 
-    monkeypatch.setattr("config_store.project_path", fake_project_path)
+    monkeypatch.setattr("core.config.project_path", fake_project_path)
 
     store = ConfigStore()
     yield store

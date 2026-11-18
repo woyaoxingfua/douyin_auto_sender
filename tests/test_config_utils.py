@@ -1,4 +1,4 @@
-from config_utils import normalize_config, normalize_friend
+from core.config import normalize_config, normalize_friend
 
 
 def test_normalize_friend_supports_legacy_city_field():

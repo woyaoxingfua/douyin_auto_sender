@@ -1,27 +1,169 @@
-"""统一配置存储：单例模式，消除多模块重复读取 config.json 的 DRY 问题。
+"""统一配置模块（v7 重写后的唯一配置入口）。
+
+合并了原 config_store.py + config_utils.py 双份实现：
+  - ConfigStore 单例：load/reload/save/env 覆盖/回调/类型化 getter
+  - 纯函数区：project_path / normalize / validate / 城市速查（原 config_utils）
 
 设计要点：
 1. 单例实例，配置只加载一次，内存中缓存
-2. 支持环境变量覆盖（优先级：环境变量 > config.json）
-3. 提供类型安全的 getter 方法
-4. 配置变更通知（回调机制）
-5. 统一的配置验证与默认值
-6. 向后兼容：保留 config_utils 的导出，逐步迁移
+2. 环境变量覆盖（优先级：环境变量 > config.json），且覆盖值不回写磁盘
+3. save() 以磁盘现有配置为基底合并，部分保存不丢数据
 """
 import json
 import os
 import threading
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Tuple
 
-from config_utils import (
-    project_path,
-    normalize_config,
-    validate_runtime_config,
-    normalize_friend,
-    COMMON_CITIES,
-    search_city_by_name,
-    create_default_friend_template,
+# ─── 路径 ───
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def project_path(*parts: str) -> str:
+    """项目根目录相对路径 -> 绝对路径。"""
+    return os.path.join(BASE_DIR, *[str(p) for p in parts])
+
+
+# ─── 默认模板与城市速查（原 config_utils） ───
+
+DEFAULT_MESSAGE_TEMPLATE = (
+    "Hi {nickname}，你所在的{city_name}今天白天{text_day}，晚上{text_night}。\n"
+    "气温是{temp_min}到{temp_max}℃，{wind_dir}{wind_scale}级。"
 )
+
+COMMON_CITIES = [
+    ("北京", "101010100"),
+    ("上海", "101020100"),
+    ("广州", "101280101"),
+    ("深圳", "101280601"),
+    ("杭州", "101210101"),
+    ("南京", "101190101"),
+    ("苏州", "101190401"),
+    ("成都", "101270101"),
+    ("重庆", "101040100"),
+    ("武汉", "101200101"),
+    ("西安", "101110101"),
+    ("天津", "101030100"),
+    ("青岛", "101120201"),
+    ("厦门", "101230201"),
+    ("长沙", "101250101"),
+    ("郑州", "101180101"),
+    ("济南", "101120101"),
+    ("沈阳", "101070101"),
+    ("大连", "101070201"),
+    ("哈尔滨", "101050101"),
+    ("昆明", "101290101"),
+    ("三亚", "101310201"),
+    ("拉萨", "101140101"),
+    ("乌鲁木齐", "101130101"),
+    ("兰州", "101160101"),
+]
+
+
+def search_city_by_name(name: str) -> List[Tuple[str, str]]:
+    """在城市速查表中搜索（用户输入后可下拉选择）。"""
+    if not name:
+        return COMMON_CITIES[:10]
+    name = name.strip().lower()
+    return [(c, cid) for c, cid in COMMON_CITIES if name in c][:20]
+
+
+def create_default_friend_template(nickname: str = "示例好友",
+                                   city_name: str = "北京") -> Dict:
+    """生成一个开箱即用的好友模板。"""
+    location_id = next((cid for c, cid in COMMON_CITIES if c == city_name),
+                       "101010100")
+    return {
+        "nickname": nickname,
+        "city_name": city_name,
+        "location_id": location_id,
+        # 保留旧版 city 字段，兼容旧分支读取
+        "city": location_id,
+        "avatar_image": "",
+        "avatar_text": "",
+    }
+
+
+# ─── 归一化与校验（原 config_utils） ───
+
+def _strip_host(host: str) -> str:
+    host = (host or "").strip()
+    if host.startswith("http://"):
+        host = host[len("http://"):]
+    if host.startswith("https://"):
+        host = host[len("https://"):]
+    return host.rstrip("/")
+
+
+def load_raw(config_path: Optional[str] = None) -> Dict:
+    """读原始 config.json（不套默认值；文件不存在返回 {}）。"""
+    path = config_path or project_path("config.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def normalize_friend(raw_friend: Dict) -> Dict:
+    nickname = str(raw_friend.get("nickname", "")).strip()
+    location_id = str(raw_friend.get("location_id") or raw_friend.get("city") or "").strip()
+    city_name = str(raw_friend.get("city_name", "")).strip()
+    avatar_image = str(raw_friend.get("avatar_image", "")).strip().replace("\\", "/")
+    avatar_text = str(raw_friend.get("avatar_text", "")).strip()
+
+    if not nickname:
+        raise ValueError("nickname 为空，已跳过")
+    if not location_id:
+        raise ValueError(f"{nickname} 缺少 location_id/city，已跳过")
+
+    return {
+        "nickname": nickname,
+        "city_name": city_name or f"ID:{location_id}",
+        "location_id": location_id,
+        "city": location_id,
+        "avatar_image": avatar_image,
+        "avatar_text": avatar_text,
+    }
+
+
+def normalize_config(raw_config: Dict) -> Tuple[Dict, List[str]]:
+    warnings: List[str] = []
+    friends: List[Dict] = []
+    for index, raw_friend in enumerate(raw_config.get("friends", []), start=1):
+        try:
+            friends.append(normalize_friend(raw_friend))
+        except ValueError as e:
+            warnings.append(f"好友#{index}: {e}")
+
+    normalized = {
+        "api_host": _strip_host(raw_config.get("api_host", "")),
+        "api_key": (raw_config.get("api_key", "") or "").strip(),
+        "message_template": (raw_config.get("message_template", "")
+                             or DEFAULT_MESSAGE_TEMPLATE).strip(),
+        "use_local_ocr": raw_config.get("use_local_ocr", True),
+        "ocr_api_key": (raw_config.get("ocr_api_key", "") or "").strip(),
+        "ocr_secret_key": (raw_config.get("ocr_secret_key", "") or "").strip(),
+        "friends": friends,
+    }
+    return normalized, warnings
+
+
+def validate_runtime_config(config: Dict) -> List[str]:
+    errors: List[str] = []
+    if not config.get("api_host"):
+        errors.append("缺少 api_host")
+    if not config.get("api_key"):
+        errors.append("缺少 api_key（可在 config.json 或环境变量 DOUYIN_WEATHER_API_KEY 提供）")
+    if not config.get("friends"):
+        errors.append("好友列表为空")
+
+    has_any_recognition = any(
+        f.get("avatar_image") or f.get("avatar_text")
+        for f in config.get("friends", [])
+    )
+    if config.get("friends") and not has_any_recognition:
+        errors.append("所有好友都未配置识别方式（头像截图或OCR文字）")
+    return errors
 
 
 class ConfigStore:

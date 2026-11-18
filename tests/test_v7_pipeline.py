@@ -14,9 +14,9 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from page_state import (HOME, MESSAGE_LIST, CHAT_OPEN, UNKNOWN,  # noqa: E402
-                        PageDetector, _roi_crop, _normalize)
-from pipeline import PipelineContext, PipelineEngine, PipelineNode  # noqa: E402
+from core.page_state import (HOME, MESSAGE_LIST, CHAT_OPEN, UNKNOWN,  # noqa: E402
+                             PageDetector, _roi_crop, _normalize)
+from core.pipeline import PipelineContext, PipelineEngine, PipelineNode  # noqa: E402
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FULLSCREEN = os.path.join(PROJECT_ROOT, "last_screen.png")
@@ -25,7 +25,7 @@ WIN_RECT = (95, 11, 1730, 997)   # 7-28 run.log 记录的抖音窗口 DWM 边界
 
 @pytest.fixture(scope="module")
 def real_ocr():
-    from ocr_service import RapidLocalOCR
+    from core.ocr import RapidLocalOCR
     return RapidLocalOCR()
 
 
@@ -88,7 +88,7 @@ def test_find_friend_in_message_flyout(real_ocr):
     好友查找链路：归一化 OCR 应能定位王佳豪。"""
     from PIL import Image
     img = Image.open(os.path.join(PROJECT_ROOT, "last_friend_list.png"))
-    from page_state import _ocr_blocks, _find_text
+    from core.page_state import _ocr_blocks, _find_text
     blocks = _ocr_blocks(img, real_ocr)
     assert _find_text(blocks, "王佳豪") is not None
     assert _find_text(blocks, "搜索") is not None
@@ -233,7 +233,7 @@ def test_pipeline_history_records_path():
     assert ctx.history == ["A", "B", "C"]
 
 
-# ---------------- bot_v2 节点逻辑（mock capture/ocr） ----------------
+# ---------------- core.bot 节点逻辑（mock capture/ocr） ----------------
 
 class FakeCapture:
     """零依赖假截图器：返回预置图片，记录坐标换算。"""
@@ -273,8 +273,8 @@ class FakeDetector:
 
 def test_assert_page_node_only_hits_expected_state(message_list_img):
     """AssertPageNode 只在目标状态命中（v7 核心：先断言后行动）。"""
-    from bot_v2 import AssertPageNode
-    from page_state import MESSAGE_LIST
+    from core.bot import AssertPageNode
+    from core.page_state import MESSAGE_LIST
 
     det = FakeDetector([(MESSAGE_LIST, {})])
     cap = FakeCapture(message_list_img)
@@ -288,17 +288,18 @@ def test_assert_page_node_only_hits_expected_state(message_list_img):
 
 def test_enter_message_list_clicks_window_coords(message_list_img):
     """EnterMessageList 命中首页时点击的是窗口坐标换算出的屏幕坐标。"""
-    from bot_v2 import EnterMessageListNode
+    from core.bot import EnterMessageListNode
+    from core.actions import WindowActions
 
     det = FakeDetector([(HOME, {'sixin_entry': (800, 40)})])
     cap = FakeCapture(message_list_img)
 
-    node = EnterMessageListNode(det, cap)
+    node = EnterMessageListNode(det, cap, WindowActions(cap))
     anchors = node.recognize(PipelineContext())
     assert anchors is not None
 
-    with patch('bot_v2.pyautogui.click') as mock_click:
-        with patch('bot_v2.time.sleep'):
+    with patch('core.actions.pyautogui.click') as mock_click:
+        with patch('core.actions.time.sleep'):
             assert node.action(PipelineContext(), anchors) is True
         sx, sy = mock_click.call_args[0]
     # FakeCapture rect=(100,50)：窗口(800,40) -> 屏幕(900,90)
@@ -311,7 +312,7 @@ def test_full_v7_pipeline_with_fake_states(message_list_img):
     新引擎语义：入口 AssertHome 命中即执行（无动作），随后每个 next 节点
     命中即执行 action —— FakeDetector 的状态按消耗顺序推进。
     """
-    from bot_v2 import build_pipeline
+    from core.bot import build_pipeline
 
     states = [
         (HOME, {'sixin_entry': (800, 40)}),          # 1 AssertHome 命中
@@ -328,13 +329,15 @@ def test_full_v7_pipeline_with_fake_states(message_list_img):
     cap = FakeCapture(message_list_img, rect=(100, 50, 1730, 997))
 
     clicks = []
-    with patch('bot_v2.pyautogui.click', side_effect=lambda x, y: clicks.append((x, y))), \
-         patch('bot_v2.pyautogui.moveTo'), \
-         patch('bot_v2.pyautogui.scroll'), \
-         patch('bot_v2.pyautogui.press'), \
-         patch('bot_v2.pyautogui.hotkey'), \
-         patch('bot_v2.pyperclip.copy'), \
-         patch('bot_v2.time.sleep'):
+    with patch('core.actions.pyautogui.click', side_effect=lambda x, y: clicks.append((x, y))), \
+         patch('core.actions.pyautogui.moveTo'), \
+         patch('core.actions.pyautogui.scroll'), \
+         patch('core.actions.pyautogui.press'), \
+         patch('core.actions.pyautogui.hotkey'), \
+         patch('core.actions.pyperclip.copy', return_value=None), \
+         patch('core.actions.pyperclip.paste', return_value="测试消息"), \
+         patch('core.actions.time.sleep'), \
+         patch('core.bot.time.sleep'):
         # OpenFriendChat 需要在列表里 OCR 到好友名：让 detector 的 ocr 返回脚本
         det.ocr = FakeOcrForFriend()
 

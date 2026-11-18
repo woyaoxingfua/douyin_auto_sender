@@ -8,7 +8,7 @@ import tempfile
 
 import pytest
 
-import message_manager
+from services import messages as message_manager
 
 
 @pytest.fixture

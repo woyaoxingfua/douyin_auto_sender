@@ -31,9 +31,9 @@ def main():
     parser.add_argument('--save-dir', default=PROJECT, help='截图保存目录')
     args = parser.parse_args()
 
-    from window_capture import demo_probe, WindowCapture
-    from page_state import PageDetector
-    from ocr_service import RapidLocalOCR
+    from core.window_capture import demo_probe, WindowCapture
+    from core.page_state import PageDetector
+    from core.ocr import RapidLocalOCR
 
     print("=" * 60)
     print("  v7 零动作探针（不点击/不滚动/不按键，安全）")
@@ -59,7 +59,7 @@ def main():
         sys.exit(3)
 
     # 用可用模式跑状态识别
-    from window_capture import find_douyin_hwnd
+    from core.window_capture import find_douyin_hwnd
     hwnd = info["hwnd"]
     cap = WindowCapture(hwnd, capture_mode=best_mode)
     detector = PageDetector(RapidLocalOCR())
@@ -83,7 +83,7 @@ def main():
             time.sleep(args.interval)
 
     print("\n探针完成：以上状态即 v7 流水线每步决策的依据。")
-    print("下一步真机测试: python bot_v2.py --friend 王佳豪")
+    print("下一步真机测试: python -m core.bot --friend 王佳豪")
 
 
 if __name__ == "__main__":
