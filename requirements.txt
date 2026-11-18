@@ -16,3 +16,6 @@ dearpygui>=2.0
 
 # 进程监控
 psutil>=5.9
+
+# v7 窗口绑定截图（screen 模式保底用，PrintWindow/BitBlt 无需它）
+mss>=9.0
